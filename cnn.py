@@ -1,5 +1,5 @@
 
-
+from cnn_architectures import cnn_rnn_v1 as baseline
 import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
 
@@ -57,11 +57,11 @@ X_train2 = X_train2[:split_at]
 #dense_outputs = 1024        # Number of units in the dense layer
 
 nb_filter = 64
-dense_outputs = 128
+dense_outputs = 256
 filter_kernels = [7, 7, 3, 3, 3, 3]     # Conv layer kernel size
 
 # Compile/fit params
-batch_size = 128
+batch_size = 256
 nb_epoch = 10
 
 graph = tf.Graph()
@@ -73,28 +73,7 @@ with graph.as_default():
     x = tf.placeholder(dtype=tf.int32, shape=(None, maxlen))
     y = tf.placeholder(dtype=tf.int32,shape=(None,6))
 
-    embedding = tf.get_variable("embedding", [transformer.vocab_size, 64], dtype=tf.float32)
-    embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
-
-    x2 = tf.layers.conv1d(embedded_input,filters=nb_filter,kernel_size=filter_kernels[0])
-    x2 = tf.layers.max_pooling1d(x2,3,1)
-
-    x2 = tf.layers.conv1d(x2,filters=nb_filter,kernel_size=filter_kernels[1])
-    x2 = tf.layers.max_pooling1d(x2,3,1)
-
-    x2 = tf.layers.conv1d(x2,filters=nb_filter,kernel_size=filter_kernels[2])
-    x2 = tf.layers.conv1d(x2,filters=nb_filter,kernel_size=filter_kernels[3])
-    x2 = tf.layers.conv1d(x2,filters=nb_filter,kernel_size=filter_kernels[4])
-    x2 = tf.layers.conv1d(x2,filters=nb_filter,kernel_size=filter_kernels[5])
-
-    x2 = tf.layers.max_pooling1d(x2, 3, 1)
-    x2 = tf.layers.flatten(x2)
-
-    x2 = layers.fully_connected(x2,dense_outputs)
-    x2 = layers.dropout(x2,keep_prob=0.5)
-    x2 = layers.fully_connected(x2, dense_outputs)
-    x2 = layers.dropout(x2, keep_prob=0.5)
-    logits = layers.fully_connected(x2, 6, activation_fn=tf.nn.sigmoid)
+    logits = baseline(x,transformer.vocab_size,nb_filter,filter_kernels,dense_outputs)
 
     loss = tf.losses.log_loss(predictions=logits, labels=y)
 
