@@ -66,7 +66,7 @@ class CNNTransformer:
 
 class Tokenizer:
 
-    def __init__(self):
+    def __init__(self,max_number_of_words = None,min_count_words=None,keep_words=0.9,min_count_chars=None,keep_chars = 0.9):
         self.tokenize_mode = 'nltk_twitter'
         if self.tokenize_mode == 'nltk_twitter':
             self.twitter_tokenizer = TweetTokenizer()
@@ -77,6 +77,14 @@ class Tokenizer:
         self.word2index = None
         self.index2word = None
         self.word_counts = None
+        self.char2index = None
+        self.index2char = None
+        self.char_counts = None
+        self.max_number_of_words = max_number_of_words
+        self.min_count_words = min_count_words
+        self.min_count_chars = min_count_chars
+        self.keep_words = keep_words
+        self.keep_chars = keep_chars
 
     def _get_sentence_detector(self):
         detector = nltk.data.load('tokenizers/punkt/english.pickle')
@@ -290,10 +298,11 @@ class Tokenizer:
         pass
 
     def fit_on_text(self,list_of_words):
-        counter = collections.Counter()
+        counter_chars = collections.Counter()
+        counter_words = collections.Counter()
         for k, words in enumerate(list_of_words):
             for w in words:
-                counter.update(w)
+                counter_words.update(w)
         # count words
         # create word2index
         # create index2word
