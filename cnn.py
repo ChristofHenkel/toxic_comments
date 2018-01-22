@@ -1,5 +1,5 @@
 
-from cnn_architectures import cnn_rnn_v1 as baseline
+from cnn_architectures import cnn_v1 as baseline
 import numpy as np # linear algebra
 import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
 
@@ -56,12 +56,12 @@ X_train2 = X_train2[:split_at]
 #nb_filter = 256     # Filters for conv layers
 #dense_outputs = 1024        # Number of units in the dense layer
 
-nb_filter = 64
-dense_outputs = 256
+nb_filter = 256
+dense_outputs = 1024
 filter_kernels = [7, 7, 3, 3, 3, 3]     # Conv layer kernel size
 
 # Compile/fit params
-batch_size = 256
+batch_size = 128
 nb_epoch = 10
 
 graph = tf.Graph()
@@ -78,7 +78,9 @@ with graph.as_default():
     loss = tf.losses.log_loss(predictions=logits, labels=y)
 
     gradients = tf.gradients(loss, tf.trainable_variables())
-    optimizer = tf.train.MomentumOptimizer(learning_rate=0.01, momentum=0.9).minimize(loss)
+    optimizer = tf.train.MomentumOptimizer(learning_rate=0.005, momentum=0.9).minimize(loss)
+    #optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.005).minimize(loss)
+    #optimizer = tf.train.AdamOptimizer(learning_rate=0.01).minimize(loss)
 
 with tf.Session(graph=graph) as sess:
 
@@ -93,6 +95,6 @@ with tf.Session(graph=graph) as sess:
             loss_, _ = sess.run([loss,optimizer],feed_dict={x:batch_x,y:batch_y})
             print('e %s -- s %s -- log-loss %s' %(e,s,loss_))
             s += 1
-        loss_, _ = sess.run([loss, optimizer], feed_dict={x: X_test2, y: Y_test})
+        loss_, _ = sess.run([loss, optimizer], feed_dict={x: X_test2[:batch_size], y: Y_test[:batch_size]})
         print('Validation e %s -- log-loss %s' % (e, loss_))
 

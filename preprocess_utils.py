@@ -8,6 +8,10 @@ from langdetect import detect
 from nltk.tokenize import word_tokenize
 # Tweet tokenizer does not split at apostophes which is what we want
 from nltk.tokenize import TweetTokenizer
+import logging
+from utils import load_bad_words
+
+logging.basicConfig(level=logging.INFO)
 
 # text features
 # words features
@@ -34,7 +38,7 @@ class CNNTransformer:
             raw_counts = list(counter.items())
 
         vocab = [char_tuple[0] for char_tuple in raw_counts if char_tuple[1] > min_count]
-        self.char2index = {char:ind for ind, char in enumerate(vocab)}
+        self.char2index = {char:(ind+1) for ind, char in enumerate(vocab)}
         self.char2index[self.unknown_char] = len(self.char2index)
         self.char2index[self.pad_char] = len(self.char2index)
         self.index2char = {ind:char for char, ind in self.char2index.items()}
@@ -66,8 +70,8 @@ class CNNTransformer:
 
 class Tokenizer:
 
-    def __init__(self,max_number_of_words = None,min_count_words=None,keep_words=0.9,min_count_chars=None,keep_chars = 0.9):
-        self.tokenize_mode = 'nltk_twitter'
+    def __init__(self,max_number_of_words = None,min_count_words=5,keep_words=0.9,min_count_chars=20,keep_chars = 0.9):
+        self.tokenize_mode = 'keras'
         if self.tokenize_mode == 'nltk_twitter':
             self.twitter_tokenizer = TweetTokenizer()
         self.sentence_detector = self._get_sentence_detector()
@@ -85,6 +89,13 @@ class Tokenizer:
         self.min_count_chars = min_count_chars
         self.keep_words = keep_words
         self.keep_chars = keep_chars
+        self.unknown_char = 'ⓤ'
+        self.pad_char = '℗'
+        self.unknown_word = '<unk>'
+        self.pad_word = '<pad>'
+        self.char_vocab_size = None
+        self.word_vocab_size = None
+        self.bad_words, self.bad_words_synonyms = load_bad_words()
 
     def _get_sentence_detector(self):
         detector = nltk.data.load('tokenizers/punkt/english.pickle')
@@ -218,6 +229,11 @@ class Tokenizer:
         return self.contractions_re.sub(replace, text)
 
 
+    def replace_badwords_with_syn(self,text):
+        for word in self.bad_words_synonyms:
+            text = text.replace(word, self.bad_words_synonyms[word])
+        return text
+
     def rm_punctuation(self, text):
         text = re.sub('[' + self.punctuation + ']', '', text)
         return text
@@ -243,10 +259,16 @@ class Tokenizer:
         return words
 
     @staticmethod
-    def rm_links(text):
-        text = re.sub("http://.*com","", text)
-        text = re.sub("www.*com", "", text)
+    def rm_links_text(text):
+        text = re.sub("http://. * ","", text)
+        text = re.sub("http://. * ", "", text)
+        text = re.sub("www..* ", "", text)
         return text
+
+    @staticmethod
+    def rm_links_words(words):
+        words = [w for w in words if not (w.startswith('http') or w.startswith('www.') or w.endswith('.com'))]
+        return words
 
     @staticmethod
     def rm_user(text):
@@ -263,27 +285,72 @@ class Tokenizer:
         text = re.sub("\d:\d\d\s{0,5}$","" ,text)
         return text
 
+    @staticmethod
+    def rm_bigrams(text):
+        text = re.sub(r'[-–]',' ',text)
+        return text
+
     def rm_leaky_features(self,text):
-        text = self.rm_links(text)
+        text = self.rm_links_text(text)
         text = self.rm_article_id(text)
         text = self.rm_ip(text)
         text = self.rm_user(text)
         text = self.rm_breaks(text)
         return text
 
-    def tokenize(self,text):
+    def text_to_word_sequence(self,text,
+                              filters='!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n',
+                              lower=True,
+                              split=' '):
+        """Converts a text to a sequence of words (or tokens).
+
+        Arguments:
+            text: Input text (string).
+            filters: Sequence of characters to filter out.
+            lower: Whether to convert the input to lowercase.
+            split: Sentence split marker (string).
+
+        Returns:
+            A list of words (or tokens).
+        """
+        if lower:
+            text = text.lower()
+        maketrans = str.maketrans
+        translate_map = maketrans(filters, split * len(filters))
+
+        text = text.translate(translate_map)
+        seq = text.split(split)
+        return [i for i in seq if i]
+
+    def simple_tokenize(self,text):
         if self.tokenize_mode == 'nltk_word':
             words = word_tokenize(text)
         elif self.tokenize_mode == 'nltk_twitter':
             words = self.twitter_tokenizer.tokenize(text)
         elif self.tokenize_mode == ' ':
             words = text.split(' ')
+        elif self.tokenize_mode == 'keras':
+            words = self.text_to_word_sequence(text)
         else:
             print('wrong mode')
             words = None
             pass
         return words
 
+    def word2seq(self,word,maxlenseq):
+        word = word[:maxlenseq]
+        seq = np.zeros(maxlenseq)
+        if not word == self.pad_word:
+            for k, c in enumerate(word):
+                seq[k] = self.char2index[c]
+        return seq
+
+    def words2charseq(self,words,maxlenseq):
+        matrix = np.zeros((len(words),maxlenseq))
+        for k,word in enumerate(words):
+            seq = self.word2seq(word, maxlenseq)
+            matrix[k] = seq
+        return matrix
 
     def sentenize(self,text):
         sentences = self.sentence_detector.tokenize(text)
@@ -294,19 +361,115 @@ class Tokenizer:
         words = [w for w in words if not w in self.stop_words]
         return words
 
-    def tokens2seq(self):
-        pass
+    def tokens2seq(self,tokens):
+        seq = np.asarray([self.word2index[token] for token in tokens])
+        return seq
 
-    def fit_on_text(self,list_of_words):
-        counter_chars = collections.Counter()
+    def seq2gazetter(self,seq):
+        known_bw = [w for w in self.bad_words if w in self.word2index]
+        gazetter = np.zeros((len(known_bw)))
+        for k, g in enumerate(gazetter):
+            if self.word2index[known_bw[k]] in seq:
+                gazetter[k] = 1
+        return gazetter
+
+    def texts_to_sequences(self, texts):
+        logging.info('converting %s lines to sequences' %len(texts))
+        sequences = [self.tokens2seq(self.tokenize(text)) for text in texts]
+        return sequences
+
+    def seq2words(self,seq):
+        words = [self.index2word[index] if index != 0 else self.pad_word for index in seq]
+        return words
+
+    def seqs_to_char_sequences(self, seqs, maxlenseq=12):
+        logging.info('converting %s lines to character sequences' %len(seqs))
+        list_of_tokens = [self.seq2words(seq) for seq in seqs]
+        char_sequences = [self.words2charseq(tokens,maxlenseq=maxlenseq) for tokens in list_of_tokens]
+        return char_sequences
+
+    def create_char_vocabulary(self, texts):
+        counter = collections.Counter()
+        for k, text in enumerate(texts):
+            counter.update(text)
+        if self.keep_chars:
+            raw_counts = counter.most_common(int(self.keep_chars*len(counter)))
+        else:
+            raw_counts = list(counter.items())
+
+        vocab = [char_tuple[0] for char_tuple in raw_counts if char_tuple[1] > self.min_count_chars]
+        self.char2index = {char:(ind+1) for ind, char in enumerate(vocab)}
+        self.char2index[self.unknown_char] = len(self.char2index)+1
+        self.char2index[self.pad_char] = len(self.char2index)+1
+        self.index2char = {ind:char for char, ind in self.char2index.items()}
+        self.char_vocab_size = len(self.char2index)
+
+    def initial_cleaning(self,text):
+        text = self.lower(text)
+        text = self.expand_contractions(text)
+        text = self.rm_bigrams(text)
+        text = self.replace_badwords_with_syn(text)
+        text = self.rm_leaky_features(text)
+        text = self.rm_breaks(text)
+        return text
+
+
+    def fit_on_texts(self,list_of_texts,rm_stopwords = True):
+        texts = [self.initial_cleaning(text) for text in list_of_texts]
+        logging.info('creating character vocab')
+        self.create_char_vocabulary(texts)
+        logging.info('Done - kept %s characters' %len(self.char2index))
+        logging.info('Getting Words')
+        list_of_words = [self.simple_tokenize(text) for text in texts]
+        list_of_words = [self.rm_links_words(words) for words in list_of_words]
+        if rm_stopwords: list_of_words = [self.rm_stopwords(words) for words in list_of_words]
+        logging.info('creating word vocab')
+        #replace unknown characters in words and count
+        #r = re.compile(r'[^' + ''.join(self.char2index.keys()) + ']')
         counter_words = collections.Counter()
         for k, words in enumerate(list_of_words):
-            for w in words:
-                counter_words.update(w)
-        # count words
-        # create word2index
-        # create index2word
+            for word in words:
+                word = self.replace_unknowns(word)
+                counter_words.update([word])
+
+        if self.keep_words:
+            raw_counts = counter_words.most_common(int(self.keep_words*len(counter_words)))
+        else:
+            raw_counts = list(counter_words.items())
+
+        #word_vocab = [char_tuple[0] for char_tuple in raw_counts if char_tuple[1] > self.min_count_words]
+        raw_counts.sort(key=lambda x: x[1], reverse=True)
+        sorted_voc = [wc[0] for wc in raw_counts]
+        sorted_voc = [w for w in sorted_voc if counter_words[w] > self.min_count_words]
+        # note that index 0 is reserved, never assigned to an existing word
+        self.word2index = dict(
+            list(zip(sorted_voc, list(range(1, len(sorted_voc) + 1)))))
+
+
+        #self.word2index = {word:ind for ind, word in enumerate(word_vocab)}
+        self.word2index[self.unknown_word] = len(self.word2index)+1
+        self.word2index[self.pad_word] = len(self.word2index)+1
+        self.index2word = {ind:word for word, ind in self.word2index.items()}
+        self.word_vocab_size = len(self.word2index)
+        logging.info('Done - kept %s words' %len(self.word2index))
+
+    def replace_unknowns(self,word):
+        new_word = ''.join(c if c in self.char2index else self.unknown_char for c in word)
+        return new_word
+
+    def get_gazetter_(self,tokens):
         pass
+
+
+    def tokenize(self,text, rm_stopwords = True):
+        text = self.initial_cleaning(text)
+        words = self.simple_tokenize(text)
+        words = self.rm_links_words(words)
+
+        tokens = [self.replace_unknowns(word) for word in words]
+        tokens = [w if w in self.word2index else self.unknown_word for w in tokens]
+        if rm_stopwords: tokens = self.rm_stopwords(tokens)
+        return tokens
 
     #def preprocess(text):
     #    text = rm_linebreak(text)
@@ -323,19 +486,8 @@ class Tokenizer:
     def _get_word_index(self):
         pass
 
-if __name__ == '__main__':
 
-    raw_data_dir = 'review_based/assets/raw_data/'
-    raw_data_fn = 'review.json'
-    json_data = open(raw_data_dir + raw_data_fn, 'r').readlines()
 
-    counter = collections.Counter()
-    for k, line in enumerate(json_data[:2000]):
-        print(k)
-        text = json.loads(line)['text']
-        words = preprocess(text)
-        if words:
-            for w in words:
-                counter.update(w)
-    print(counter)
-    print('len %s' % len(counter))
+
+
+
