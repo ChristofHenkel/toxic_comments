@@ -18,8 +18,17 @@ train = pd.read_csv("assets/raw_data/train.csv")
 test = pd.read_csv("assets/raw_data/test.csv")
 train = train.sample(frac=1,random_state=1)
 
-list_sentences_train = train["comment_text"].fillna("Nothing").values
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
+
+
+list_sentences_train = train["comment_text"].fillna("Nothing").values
+Y_train = train[list_classes].values
+
+split_at = int(len(list_sentences_train)*0.9)
+list_sentences_valid = list_sentences_train[split_at:]
+list_sentences_train = list_sentences_train[:split_at]
+Y_valid = Y_train[split_at:]
+Y_train = Y_train[:split_at]
 
 list_sentences_test = test["comment_text"].fillna("Nothing").values
 
@@ -31,17 +40,10 @@ list_sentences_test = test["comment_text"].fillna("Nothing").values
 tokenizer = Tokenizer(min_count_words=5,min_count_chars=200)
 tokenizer.fit_on_texts(list_sentences_train)
 
-def load_train_data():
-    Y_train = train[list_classes].values
-    list_tokenized_train = tokenizer.texts_to_sequences(list_sentences_train)
-    split_at = int(len(list_tokenized_train)*0.8)
-    list_tokenized_valid = list_tokenized_train[split_at:]
-    list_tokenized_train = list_tokenized_train[:split_at]
-    Y_valid = Y_train[split_at:]
-    Y_train = Y_train[:split_at]
-    X_train = sequence.pad_sequences(list_tokenized_train, maxlen=maxlen)
-    X_valid = sequence.pad_sequences(list_tokenized_valid, maxlen=maxlen)
-    return X_train, X_valid, Y_train, Y_valid
+def load_train_data(list_sentences):
+    list_tokenized = tokenizer.texts_to_sequences(list_sentences)
+    X_train = sequence.pad_sequences(list_tokenized, maxlen=maxlen)
+    return X_train
 
 def extract_gazetter(X_train):
     print('getting gazetter features')
@@ -54,7 +56,8 @@ def extract_charseq(X_train):
     return Z_train
 
 
-X_train, X_valid, Y_train, Y_valid = load_train_data()
+X_train = load_train_data(list_sentences_train)
+X_valid = load_train_data(list_sentences_valid)
 Z_train = extract_charseq(X_train)
 Z_valid = extract_charseq(X_valid)
 
@@ -73,8 +76,11 @@ def load_test_data():
 pre_embedding = load_glove_embedding(tokenizer.word2index)
 
 bsize = 512
+
 train_iters = len(X_train) - bsize
-epochs = 4
+vbsize = 512
+valid_iters = len(X_valid) - vbsize
+epochs = 3
 steps = train_iters // bsize
 
 def run_gazetter_model():
@@ -111,12 +117,17 @@ def run_gazetter_model():
                 costs.append(cost_)
                 step += 1
 
-            test_cost_ = sess.run(cost, feed_dict={x: G_valid[:2000],
-                                                   y: Y_valid[:2000],
-                                                   })
-            avg_cost = costs[-(2000 // bsize):]
+            vstep = 0
+            vcosts = []
+            while step * bsize <valid_iters:
+                valid_cost_ = sess.run(cost, feed_dict={x: G_valid[:2000],
+                                                       y: Y_valid[:2000],
+                                                       })
+                vcosts.append(valid_cost_)
+                vstep +=1
+            avg_cost = costs[-(valid_iters // bsize):]
             print('avg train loss: %s' % avg_cost)
-            print('valid loss: %s' % test_cost_)
+            print('valid loss: %s' % valid_cost_)
 
 
 G_train = extract_gazetter(X_train)
@@ -125,7 +136,7 @@ G_valid = extract_gazetter(X_valid)
 graph = tf.Graph()
 with graph.as_default():
     # tf Graph input
-    tf.set_random_seed(1)
+
     with tf.name_scope("Input"):
         x = tf.placeholder(tf.int32, shape=(None,maxlen), name="input_x")
         z = tf.placeholder(tf.int32, shape=(None,maxlen,12), name="input_z")
@@ -217,7 +228,7 @@ with graph.as_default():
     optimizer = tf.train.AdamOptimizer(learning_rate=0.001).minimize(cost)
 
 with tf.Session(graph=graph) as sess:
-
+    tf.set_random_seed(1)
     init = tf.global_variables_initializer()
     sess.run(init)
     for epoch in range(epochs):
@@ -238,14 +249,21 @@ with tf.Session(graph=graph) as sess:
 
             step += 1
             costs.append(cost_)
-        test_cost_ = sess.run(cost, feed_dict={x: X_valid[:2000],
-                                               y: Y_valid[:2000],
-                                               z: Z_valid[:2000],
-                                               g: G_valid[:2000],
-                                               keep_prob:1,
-                                               keep_prob_rnn: 1})
-        print('valid loss: %s' %test_cost_)
-        avg_cost = np.mean(costs[-(2000 // bsize):])
+
+        vstep = 0
+        vcosts = []
+        while vstep * vbsize < valid_iters:
+            test_cost_ = sess.run(cost, feed_dict={x: X_valid[vstep*vbsize:(vstep+1)*vbsize],
+                                                   y: Y_valid[vstep*vbsize:(vstep+1)*vbsize],
+                                                   z: Z_valid[vstep*vbsize:(vstep+1)*vbsize],
+                                                   g: G_valid[vstep*vbsize:(vstep+1)*vbsize],
+                                                   keep_prob:1,
+                                                   keep_prob_rnn: 1})
+            vstep += 1
+            vcosts.append(test_cost_)
+        avg_cost = np.log(np.mean(np.exp(vcosts)))
+        print('valid loss: %s' %avg_cost)
+        avg_cost = np.log(np.mean(np.exp(costs[-(valid_iters // bsize):])))
         print('avg train loss: %s' % avg_cost)
 
 
@@ -273,4 +291,4 @@ with tf.Session(graph=graph) as sess:
 
         sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
         sample_submission[list_classes] = res
-        sample_submission.to_csv("submissions/XGZ_" + str(epoch) + ".csv", index=False)
+        sample_submission.to_csv("submissions/XGZ_v1_e" + str(epoch) + ".csv", index=False)
