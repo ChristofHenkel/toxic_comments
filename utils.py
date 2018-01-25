@@ -34,12 +34,13 @@ def create_textcorpus(corpus,fp_out):
         f.writelines(textcorpus)
 
 def load_bad_words():
-    fn = 'assets/badwords.txt'
-    with open(fn) as f:
-        content = [l.strip().lower() for l in f.readlines()]
+    fn1 = 'assets/badwords.txt'
+    fn2 = 'assets/swearWords.txt'
+    with open(fn1) as f:
+        content1 = [l.strip().lower() for l in f.readlines()]
     list_bad_words = []
     syns = {}
-    for line in content:
+    for line in content1:
         items = line.split(', ')
         if len(items) == 1:
             if not items[0] in list_bad_words:
@@ -48,6 +49,9 @@ def load_bad_words():
             syns[items[0]] = items[1]
             if not items[1] in list_bad_words:
                 list_bad_words.append(items[1])
+    with open(fn2) as f:
+        swearwords = [l.strip().lower() for l in f.readlines()]
+    list_bad_words.extend(swearwords)
     return list_bad_words, syns
 
 

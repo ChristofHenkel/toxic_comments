@@ -6,34 +6,63 @@ https://arxiv.org/abs/1710.09412
 """
 
 import numpy as np
+import tqdm
+from random import choices, choice, shuffle
+from joblib import Parallel, delayed
+from textblob import TextBlob
+from textblob.translate import NotTranslated
+
+def mixup( X, Y,alpha, portion):
+    size = int(len(X) * portion)
+    lam = np.random.beta(alpha, alpha, size)
+    lambdas = lam.reshape(size, 1)
+
+    indices = [ind for ind, x in enumerate(Y)]
+    indices1 = np.random.permutation(indices)
+    indices2 = np.random.permutation(indices1)
 
 
-def mixup_old(alpha, batch_size, batch_x, batch_y):
-    lam = np.random.beta(alpha, alpha, batch_size)
-    x_weight = lam.reshape(batch_size, 1)
-    y_weight = lam.reshape(batch_size, 1)
-    index = np.random.permutation(batch_size)
-    x1, x2 = batch_x, batch_x[index]
-    x = x1 * x_weight + x2 * (1 - x_weight)
-    y1, y2 = batch_y, batch_y[index]
-    y = y1 * y_weight + y2 * (1 - y_weight)
-    return x, y
+    x1, x2 = X[indices1][:size], X[indices2][:size]
+    X_mixed = x1 * lambdas + x2 * (1 - lambdas)
+    y1, y2 = Y[indices1][:size], Y[indices2][:size]
+    Y_mixed = y1 * lambdas + y2 * (1 - lambdas)
 
 
-def mixup(alpha, x1, x2, y1, y2):
-    lam = np.random.beta(alpha, alpha)
-    x = x1 * lam + x2 * (1 - lam)
-    y = y1 * lam + y2 * (1 - lam)
-    return x, y
+    X_new = np.concatenate((X, X_mixed))
+    Y_new = np.concatenate((Y, Y_mixed))
+    old_indices = [ind for ind, x in enumerate(Y_new)]
+    indices3 = np.random.permutation(old_indices)
+    return X_new[indices3], Y_new[indices3]
 
 
-def augment_with_mixup(X, Y, alpha, portion):
-    iters = len(X) // portion
-    X_new = np.zeros((iters,X.shape[1]))
-    Y_new = np.zeros((iters,Y.shape[1]))
-    for i in iters:
-        indices = [k for k, x in enumerate(X)]
-        ind1, ind2 = np.random.choice(indices,2,replace=False)
-        X_new[i], Y_new[i] = mixup(alpha, X[ind1], X[ind2],Y[ind1], Y[ind2])
-    res = np.random.shuffle((np.concatenate((X,X_new)),np.concatenate((Y,Y_new))))
-    return res[0], res[1]
+def augment_with_translation(list_of_sentences, portion):
+
+    def translate_translate(comment, language):
+        if hasattr(comment, "decode"):
+            comment = comment.decode("utf-8")
+
+        text = TextBlob(comment)
+        try:
+            text = text.translate(to=language)
+            text = text.translate(to="en")
+        except NotTranslated:
+            pass
+
+        return str(text)
+
+    end = int(len(list_of_sentences) * portion)
+    sentences = choices(list_of_sentences, k=end)
+    new_sentences = []
+    for sentence in tqdm.tqdm(sentences):
+        lang = choice(['de','en','fr'])
+        new_sentence = translate_translate(sentence,lang)
+        new_sentences.append(new_sentence)
+    list_of_sentences.extend(new_sentences)
+    return shuffle(list_of_sentences)
+
+
+
+
+
+
+
