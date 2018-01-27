@@ -1,35 +1,56 @@
 import pandas as pd
+import numpy as np
 from tensorflow.contrib.keras.api.keras.preprocessing.text import Tokenizer
 from tensorflow.contrib.keras.api.keras.preprocessing.sequence import pad_sequences
 from tensorflow.contrib.keras.api.keras.losses import binary_crossentropy
-import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import layers
+from sklearn.model_selection import train_test_split
+
 import nltk
-import tqdm
+from nltk.tokenize import TweetTokenizer
 from gensim.models import KeyedVectors
+
+import tqdm
 import os
+import time
+
+from mixup import augmented_with_translation_disk, mixup
 
 UNKNOWN_WORD = "_UNK_"
 END_WORD = "_END_"
 NAN_WORD = "_NAN_"
+MAXLEN = 500
 
 train_data = pd.read_csv("assets/raw_data/train.csv")
 test_data = pd.read_csv("assets/raw_data/test.csv")
-train_data = train_data.sample(frac=1)
 
-list_sentences_train = train_data["comment_text"].fillna(NAN_WORD).values
-list_sentences_test = test_data["comment_text"].fillna(NAN_WORD).values
+
+#train_data = augmented_with_translation_disk(train_data, 0.3)
+
+
+sentences_train = train_data["comment_text"].fillna("_NAN_").values
+#sentences_valid = valid_data["comment_text"].fillna("_NAN_").values
+sentences_test = test_data["comment_text"].fillna("_NAN_").values
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
+
 Y_train = train_data[list_classes].values
+#Y_valid = valid_data[list_classes].values
 
+print(sentences_train[3])
 
-def tokenize_sentences(sentences, words_dict):
+def tokenize_sentences(sentences, words_dict, mode = 'nltk'):
+    twitter_tokenizer = TweetTokenizer()
     tokenized_sentences = []
     for sentence in tqdm.tqdm(sentences):
         if hasattr(sentence, "decode"):
             sentence = sentence.decode("utf-8")
-        tokens = nltk.tokenize.word_tokenize(sentence)
+        if mode == 'nltk':
+            tokens = nltk.tokenize.word_tokenize(sentence)
+        elif mode == 'twitter':
+            tokens = twitter_tokenizer.tokenize(sentence)
+        else:
+            tokens = None
         result = []
         for word in tokens:
             word = word.lower()
@@ -53,11 +74,27 @@ def clear_embedding_list(model, embedding_word_dict, words_dict):
 
     return cleared_embedding_list, cleared_embedding_word_dict
 
+def get_bad_sentences(vlosses, vlogits, X_valid, Y_valid):
+    idx = (-vlosses).argsort()[:100]
+    X = X_valid[idx]
+    Y = Y_valid[idx]
+    logits = vlogits[idx]
+    preds = np.concatenate((Y,logits))
+    losses = vlosses[idx]
+    sentences = []
+    for row in X:
+        sentences.append(' '.join([id_to_embedded_word[r] for r in row]))
+    d = pd.DataFrame(preds, columns=list_classes.extend(['l' + label for label in list_classes]))
+    #d[list_classes] = Y
+    d['words'] = pd.Series(sentences)
+    d['idx'] = pd.Series(idx)
+    d['loss'] = pd.Series(losses)
+    d.to_csv('misclassifies.csv', index=False)
 
 def convert_tokens_to_ids(tokenized_sentences, words_list, embedding_word_dict, sentences_length):
     words_train = []
 
-    for sentence in tqdm.tqdm(tokenized_sentences):
+    for sentence in tqdm.tqdm(tokenized_sentences,mininterval=5):
         current_words = []
         for word_index in sentence:
             word = words_list[word_index]
@@ -73,10 +110,13 @@ def convert_tokens_to_ids(tokenized_sentences, words_list, embedding_word_dict, 
 
 
 print("Tokenizing sentences in train set...")
-tokenized_sentences_train, words_dict = tokenize_sentences(list_sentences_train, {})
+tokenized_sentences_train, words_dict = tokenize_sentences(sentences_train, {})
+
+#print("Tokenizing sentences in validation set...")
+#tokenized_sentences_valid, words_dict = tokenize_sentences(sentences_valid, words_dict)
 
 print("Tokenizing sentences in test set...")
-tokenized_sentences_test, words_dict = tokenize_sentences(list_sentences_test, words_dict)
+tokenized_sentences_test, words_dict = tokenize_sentences(sentences_test, words_dict)
 
 words_dict[UNKNOWN_WORD] = len(words_dict)
 
@@ -101,18 +141,23 @@ embedding_list.append([-1.] * embedding_size)
 embedding_matrix = np.array(embedding_list)
 
 id_to_word = dict((id, word) for word, id in words_dict.items())
-train_list_of_token_ids = convert_tokens_to_ids(
-    tokenized_sentences_train,
-    id_to_word,
-    embedding_word_dict,
-    500)
-test_list_of_token_ids = convert_tokens_to_ids(
-    tokenized_sentences_test,
-    id_to_word,
-    embedding_word_dict,
-    500)
+id_to_embedded_word = dict((id, word) for word, id in embedding_word_dict.items())
+train_list_of_token_ids = convert_tokens_to_ids(tokenized_sentences_train,id_to_word,embedding_word_dict,MAXLEN)
+#valid_list_of_token_ids = convert_tokens_to_ids(tokenized_sentences_valid,id_to_word,embedding_word_dict,MAXLEN)
+
+test_list_of_token_ids = convert_tokens_to_ids(tokenized_sentences_test,id_to_word,embedding_word_dict,MAXLEN)
+
 X_train = np.array(train_list_of_token_ids)
+#X_valid = np.array(valid_list_of_token_ids)
+X_train, X_valid, Y_train, Y_valid = train_test_split(X_train, Y_train, test_size=0.1, random_state=42)
 X_test = np.array(test_list_of_token_ids)
+
+print(X_train[3][:10])
+#X_train, Y_train = mixup(X_train,Y_train,2,0.1, seed=23)
+
+
+
+bsize = 512
 
 
 graph = tf.Graph()
@@ -121,59 +166,53 @@ with graph.as_default():
     # tf Graph input
     tf.set_random_seed(1)
 
-    x = tf.placeholder(tf.int32, shape=(None,500), name="input_x")
+    x = tf.placeholder(tf.int32, shape=(None,MAXLEN), name="input_x")
     y = tf.placeholder(tf.float32, shape=(None,6), name="input_y")
     keep_prob = tf.placeholder(dtype=tf.float32, name="input_keep_prob")
-    batch_size = tf.shape(x[0])[0]
     with tf.name_scope("Embedding"):
         #embedding = tf.get_variable("embedding", [len(tokenizer.word2index), 100], dtype=tf.float32,initializer=tf.constant_initializer(pre_embedding), trainable=False)
         embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
         embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
 
-    #rnn_cudnn1 = tf.contrib.cudnn_rnn.CudnnGRU(input_size= 500,num_layers= 2, num_units = 64,direction='bidirectional')
-    #param_cudnn = tf.Variable(tf.zeros([rnn_cudnn1.params_size()]), validate_shape=False)
-    #y_cudnn, state_cudnn = rnn_cudnn1(tf.transpose(embedded_input, [1, 0, 2]),tf.zeros([2, tf.shape(x)[0], 64]),param_cudnn)
+    """
+    fw_cudnn_cell1 = tf.contrib.cudnn_rnn.CudnnGRU(input_size= 500,num_layers= 1, num_units = 64,direction='bidirectional',seed = 123)
+    param_cudnn = tf.Variable(tf.zeros([fw_cudnn_cell1.params_size()]), validate_shape=False)
+    y_cudnn, state_cudnn = fw_cudnn_cell1(tf.transpose(embedded_input, [1, 0, 2]),tf.zeros([2, bsize, 64]),param_cudnn)
+    outputs = tf.transpose(y_cudnn, [1, 0, 2])
+    outputs = tf.nn.dropout(outputs, keep_prob=keep_prob)
+    fw_cudnn_cell2 = tf.contrib.cudnn_rnn.CudnnGRU(input_size= 500,num_layers= 1, num_units = 64,direction='bidirectional',seed = 123)
+    param_cudnn2 = tf.Variable(tf.zeros([fw_cudnn_cell2.params_size()]), validate_shape=False)
+    y_cudnn2, state_cudnn2 = fw_cudnn_cell2(tf.transpose(outputs, [1, 0, 2]),tf.zeros([2, bsize, 64]),param_cudnn2)
+    outputs = tf.transpose(y_cudnn2, [1, 0, 2])
+    """
 
-    #rnn_cudnn2 = tf.contrib.cudnn_rnn.CudnnGRU(input_size=500, num_layers=2, num_units=64, direction='bidirectional')
 
-    #outputs = tf.transpose(y_cudnn, [1, 0, 2])
-    #outputs = Bidirectional(CuDNNGRU(64, return_sequences=True))(embedded_input)
-    #outputs = Dropout(keep_prob)(outputs)
-
-    #outputs = tf.nn.dropout(outputs,keep_prob=keep_prob)
-    #outputs = Bidirectional(CuDNNGRU(64, return_sequences=False))(outputs)
 
     with tf.variable_scope('forward'):
 
-        fw_cell1 = tf.nn.rnn_cell.GRUCell(64,)
-        fw_cell1 = tf.nn.rnn_cell.DropoutWrapper(fw_cell1, output_keep_prob=keep_prob, seed=123)
+        fw_cell1 = tf.nn.rnn_cell.GRUCell(64)
+        fw_cell1 = tf.nn.rnn_cell.DropoutWrapper(fw_cell1, output_keep_prob=keep_prob)
         fw_cell2 = tf.nn.rnn_cell.GRUCell(64)
-        #fw_cell2 = tf.contrib.rnn.AttentionCellWrapper(fw_cell2,3)
         stacked_fw_rnn = [fw_cell1,fw_cell2]
         fw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_fw_rnn, state_is_tuple=True)
 
     with tf.variable_scope('backward'):
         bw_cell1 = tf.nn.rnn_cell.GRUCell(64)
-        bw_cell1 = tf.nn.rnn_cell.DropoutWrapper(bw_cell1, output_keep_prob=keep_prob, seed=124)
+        bw_cell1 = tf.nn.rnn_cell.DropoutWrapper(bw_cell1, output_keep_prob=keep_prob)
         bw_cell2 = tf.nn.rnn_cell.GRUCell(64)
-        #bw_cell2 = tf.contrib.rnn.AttentionCellWrapper(bw_cell2, 3)
         stacked_bw_rnn = [bw_cell1,bw_cell2]
         bw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_bw_rnn, state_is_tuple=True)
 
-    ## outputs, _ = tf.nn.bidirectional_dynamic_rnn(fw_cell,bw_cell,embedded_input,dtype=tf.float32)
     outputs, _ = tf.nn.bidirectional_dynamic_rnn(fw_multi_cell, bw_multi_cell, embedded_input, dtype=tf.float32)
     output_fw, output_bw = outputs
 
     outputs = tf.concat([output_fw, output_bw], axis = 2)
-    #outputs = tf.transpose(outputs, [0, 2, 1])
-    outputs = outputs[:,:,-1]
 
-    #outputs = tf.add(output_fw[:,:,-1],output_bw[:,:,-1])
-    #outputs = tf.reduce_mean(tf.stack([output_fw[:, :, -1], output_bw[:, :, -1]]), axis=0)
-    #outputs = tf.concat([output_fw[:, :, -1], output_bw[:, :, -1]], axis=0)
+    outputs = tf.transpose(outputs, [0, 2, 1])
 
-    #outputs = outputs[:, :, -1]
-    #outputs = tf.reduce_mean(outputs, axis=2)
+    outputs = tf.reduce_max(outputs, axis=2)
+    #outputs = outputs[:,:,-1]
+
     x3 = layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
     logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
 
@@ -184,25 +223,13 @@ with graph.as_default():
     optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(loss)
 
 
-fold_size = len(X_train) // 10
-fold_start = 0
-fold_end = fold_size
 
-train_x = np.concatenate([X_train[:fold_start], X_train[fold_end:]])
-train_y = np.concatenate([Y_train[:fold_start], Y_train[fold_end:]])
 
-##from mixup import augment_with_mixup
-
-##train_x, train_y = mixup(train_x,train_y,0.7,0.3)
-
-val_x = X_train[fold_start:fold_end]
-val_y = Y_train[fold_start:fold_end]
 
 epochs = 12
-bsize = 512
-train_iters = len(train_x) - bsize
+train_iters = len(X_train) - bsize
 steps = train_iters // bsize
-valid_iters = len(val_x) - bsize
+valid_iters = len(X_valid) - bsize
 
 sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
 
@@ -210,46 +237,67 @@ with tf.Session(graph=graph) as sess:
 
     init = tf.global_variables_initializer()
     sess.run(init)
+
     for epoch in range(epochs):
+        tic = time.time()
         costs = []
         step = 0
         while step * bsize < train_iters:
-            batch_x = train_x[step*bsize:(step+1)*bsize]
-            batch_y = train_y[step*bsize:(step+1)*bsize]
+            batch_x = X_train[step * bsize:(step + 1) * bsize]
+            batch_y = Y_train[step * bsize:(step + 1) * bsize]
             cost_ , _ = sess.run([cost,optimizer],feed_dict={x:batch_x,
                                                              y:batch_y,
                                                              keep_prob:0.7})
-            print('e %s/%s  --  s %s/%s  -- cost %s' %(epoch,epochs,step,steps,cost_))
+            if step % 10 == 0:
+                print('e %s/%s  --  s %s/%s  -- cost %s' %(epoch,epochs,step,steps,cost_))
             costs.append(cost_)
             step += 1
 
         vstep = 0
         vcosts = []
+        vlosses = np.asarray([])
         while vstep * bsize < valid_iters:
-            test_cost_ = sess.run(cost, feed_dict={x: val_x[vstep * bsize:(vstep + 1) * bsize],
-                                                   y: val_y[vstep * bsize:(vstep + 1) * bsize],
+            test_cost_, valid_loss = sess.run([cost,loss], feed_dict={x: X_valid[vstep * bsize:(vstep + 1) * bsize],
+                                                   y: Y_valid[vstep * bsize:(vstep + 1) * bsize],
                                                    keep_prob: 1
                                                    })
             vstep += 1
             vcosts.append(test_cost_)
+            vlosses = np.concatenate((vlosses,valid_loss))
         avg_cost = np.log(np.mean(np.exp(vcosts)))
+        toc = time.time()
+        print('time needed %s' %(toc-tic))
         print('valid loss: %s' % avg_cost)
-        print('train loss %s' % np.log(np.mean(np.exp(costs[:valid_iters]))))
-        num_batches = (len(X_test) // bsize) + 1
+        avg_train_cost = np.log(np.mean(np.exp(costs[:valid_iters])))
+        print('train loss %s' %avg_train_cost )
 
+
+
+        num_batches = (len(X_test) // bsize) + 1
         res = np.zeros((len(X_test), 6))
         for s in range(num_batches):
-            print(s)
+            if s % 50 == 0:
+                print(s)
             batch_x_test = X_test[s * bsize:(s + 1) * bsize]
+            if s == num_batches - 1:
+                pad_size = bsize - batch_x_test.shape[0]
+                pad = np.zeros(shape=(pad_size, X_test.shape[1]))
+                batch_x_test = np.concatenate((batch_x_test, pad))
             logits_ = sess.run(logits, feed_dict={x: batch_x_test,
                                                   keep_prob: 1})
-            res[s * bsize:(s + 1) * bsize] = logits_
-
+            if s != num_batches - 1:
+                res[s * bsize:(s + 1) * bsize] = logits_
+            else:
+                res[s * bsize:(s + 1) * bsize - pad_size] = logits_[:bsize - pad_size]
 
         sample_submission[list_classes] = res
 
-        dir_name = 'pavel12/'
+        dir_name = 'pavel24/'
         if not os.path.exists('submissions/' + dir_name):
             os.mkdir('submissions/' + dir_name)
-        sample_submission.to_csv("submissions/" + dir_name + "model_e"+ str(epoch) + "v"+ str(round(avg_cost,ndigits=4)) + ".csv", index=False)
+        fn = "submissions/"
+        fn += dir_name + "model_e"+ str(epoch)
+        fn += "v"+ str(round(avg_cost,ndigits=4)) + "t"+ str(round(avg_train_cost,ndigits=4)) + ".csv"
+        sample_submission.to_csv(fn, index=False)
+
 

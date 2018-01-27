@@ -22,22 +22,19 @@ def train_folds(X, y, fold_count, batch_size, get_model_func):
 
     return models
 
-csv_files = ['test8_pavel_k0e11v0.0435.csv',
-             'test8_pavel_k1e9v0.0422.csv',
-             'test8_pavel_k2e11v0.0421.csv',
-             'test8_pavel_k3e11v0.042.csv',
-             'test8_pavel_k4e10v0.0422.csv',
-             'test8_pavel_k5e10v0.0427.csv',
-             'test8_pavel_k6e10v0.0446.csv',
-             'test8_pavel_k7e11v0.0422.csv',
-             'test8_pavel_k8e11v0.0432.csv',
-             'test8_pavel_k9e9v0.042.csv']
+csv_files = ['model_e4v0.0409t0.0492.csv',
+             'model_e7v0.0403t0.0456.csv',
+             'model_e9v0.0409t0.0433.csv',
+             'model_e8v0.0406t0.0445.csv',
+             'model_e6v0.0402t0.0467.csv',
+             'model_e5v0.0405t0.0479.csv',
+]
 
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 
 test_predicts_list = []
 for csv_file in csv_files:
-    orig_submission = pd.read_csv('submissions/' + csv_file)
+    orig_submission = pd.read_csv('submissions/pavel20/' + csv_file)
     predictions = orig_submission[list_classes]
     test_predicts_list.append(predictions)
 
@@ -50,4 +47,4 @@ test_predicts **= (1. / len(test_predicts_list))
 
 new_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
 new_submission[list_classes] = test_predicts
-new_submission.to_csv("submissions/test8_pavel_10kfold.csv", index=False)
+new_submission.to_csv("submissions/pavel20/fold_e4-e9.csv", index=False)

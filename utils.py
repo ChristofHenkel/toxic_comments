@@ -121,3 +121,27 @@ def load_glove_embedding(word_index,dims = 100,max_features=1000000):
 
 def list_seq2word_dict(list_seq,word2index):
     index2word = {ind:w for w, ind in word2index.items()}
+
+X_test = np.zeros((154361,100))
+
+bsize = 512
+num_batches = (len(X_test) // bsize) + 1
+len_last_batch = len(X_test) % bsize
+
+pad = np.zeros(shape=(len_last_batch,X_test.shape[1]))
+X_te2 = np.concatenate((X_test,pad))
+
+res = np.zeros((len(X_test), 6))
+for s in range(num_batches):
+
+    batch_x_test = X_test[s * bsize:(s + 1) * bsize]
+    if s == num_batches-1:
+        pad_size = bsize-batch_x_test.shape[0]
+        pad = np.zeros(shape=(pad_size, X_test.shape[1]))
+        batch_x_test = np.concatenate((batch_x_test,pad))
+    print([batch_x_test.shape,s])
+
+    if s is not num_batches-1:
+        res[s * bsize:(s + 1) * bsize] = [1,2,3,4,5,6]
+    else:
+        res[s * bsize:bsize-pad_size] = [1,2,3,4,5,6]
