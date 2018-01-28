@@ -78,8 +78,7 @@ def get_bad_sentences(vlosses, vlogits, X_valid, Y_valid):
     idx = (-vlosses).argsort()[:100]
     X = X_valid[idx]
     Y = Y_valid[idx]
-    logits = vlogits[idx]
-    preds = np.concatenate((Y,logits))
+    preds = np.concatenate((Y,vlogits[idx]))
     losses = vlosses[idx]
     sentences = []
     for row in X:
@@ -89,7 +88,7 @@ def get_bad_sentences(vlosses, vlogits, X_valid, Y_valid):
     d['words'] = pd.Series(sentences)
     d['idx'] = pd.Series(idx)
     d['loss'] = pd.Series(losses)
-    d.to_csv('misclassifies.csv', index=False)
+    d.to_csv('misclassifies2.csv', index=False)
 
 def convert_tokens_to_ids(tokenized_sentences, words_list, embedding_word_dict, sentences_length):
     words_train = []
@@ -149,7 +148,22 @@ test_list_of_token_ids = convert_tokens_to_ids(tokenized_sentences_test,id_to_wo
 
 X_train = np.array(train_list_of_token_ids)
 #X_valid = np.array(valid_list_of_token_ids)
-X_train, X_valid, Y_train, Y_valid = train_test_split(X_train, Y_train, test_size=0.1, random_state=42)
+
+
+fold_size = len(X_train) // 10
+models = []
+
+fold_start = 0
+fold_end = fold_start + fold_size
+
+X_valid = X_train[fold_start:fold_end]
+Y_valid = Y_train[fold_start:fold_end]
+X_train = np.concatenate([X_train[:fold_start], X_train[fold_end:]])
+Y_train = np.concatenate([Y_train[:fold_start], Y_train[fold_end:]])
+
+
+
+#X_train, X_valid, Y_train, Y_valid = train_test_split(X_train, Y_train, test_size=0.2, random_state=1)
 X_test = np.array(test_list_of_token_ids)
 
 print(X_train[3][:10])
@@ -218,6 +232,7 @@ with graph.as_default():
 
     loss = binary_crossentropy(y,logits)
     cost = tf.losses.log_loss(predictions=logits, labels=y)
+    loss2 = tf.losses.sigmoid_cross_entropy(y,logits)
     #optimizer = tf.train.AdamOptimizer(learning_rate=0.001).minimize(cost)
 
     optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(loss)
@@ -279,20 +294,20 @@ with tf.Session(graph=graph) as sess:
             if s % 50 == 0:
                 print(s)
             batch_x_test = X_test[s * bsize:(s + 1) * bsize]
-            if s == num_batches - 1:
-                pad_size = bsize - batch_x_test.shape[0]
-                pad = np.zeros(shape=(pad_size, X_test.shape[1]))
-                batch_x_test = np.concatenate((batch_x_test, pad))
+            #if s == num_batches - 1:
+            #    pad_size = bsize - batch_x_test.shape[0]
+            #    pad = np.zeros(shape=(pad_size, X_test.shape[1]))
+            #    batch_x_test = np.concatenate((batch_x_test, pad))
             logits_ = sess.run(logits, feed_dict={x: batch_x_test,
                                                   keep_prob: 1})
-            if s != num_batches - 1:
-                res[s * bsize:(s + 1) * bsize] = logits_
-            else:
-                res[s * bsize:(s + 1) * bsize - pad_size] = logits_[:bsize - pad_size]
+            #if s != num_batches - 1:
+            res[s * bsize:(s + 1) * bsize] = logits_
+            #else:
+            #    res[s * bsize:(s + 1) * bsize - pad_size] = logits_[:bsize - pad_size]
 
         sample_submission[list_classes] = res
 
-        dir_name = 'pavel24/'
+        dir_name = 'pavel27/'
         if not os.path.exists('submissions/' + dir_name):
             os.mkdir('submissions/' + dir_name)
         fn = "submissions/"
