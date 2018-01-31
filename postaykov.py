@@ -1,21 +1,18 @@
 import pandas as pd
 import numpy as np
-from tensorflow.contrib.keras.api.keras.preprocessing.text import Tokenizer
-from tensorflow.contrib.keras.api.keras.preprocessing.sequence import pad_sequences
 from tensorflow.contrib.keras.api.keras.losses import binary_crossentropy
 import tensorflow as tf
 from tensorflow.contrib import layers
-from sklearn.model_selection import train_test_split
-
+from utilities import get_oov_vector
 import nltk
 from nltk.tokenize import TweetTokenizer
 from gensim.models import KeyedVectors
-
+from preprocess_utils import Preprocessor
 import tqdm
 import os
 import time
 
-from mixup import augmented_with_translation_disk, mixup
+from mixup import augmented_with_translation, mixup
 
 UNKNOWN_WORD = "_UNK_"
 END_WORD = "_END_"
@@ -24,7 +21,7 @@ MAXLEN = 500
 
 train_data = pd.read_csv("assets/raw_data/train.csv")
 test_data = pd.read_csv("assets/raw_data/test.csv")
-
+preprocessor = Preprocessor()
 
 #train_data = augmented_with_translation_disk(train_data, 0.3)
 
@@ -34,7 +31,7 @@ sentences_train = train_data["comment_text"].fillna("_NAN_").values
 sentences_test = test_data["comment_text"].fillna("_NAN_").values
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 
-Y_train = train_data[list_classes].values
+Y = train_data[list_classes].values
 #Y_valid = valid_data[list_classes].values
 
 print(sentences_train[3])
@@ -45,6 +42,7 @@ def tokenize_sentences(sentences, words_dict, mode = 'nltk'):
     for sentence in tqdm.tqdm(sentences):
         if hasattr(sentence, "decode"):
             sentence = sentence.decode("utf-8")
+        sentence = preprocessor.expand_contractions(sentence)
         if mode == 'nltk':
             tokens = nltk.tokenize.word_tokenize(sentence)
         elif mode == 'twitter':
@@ -64,14 +62,24 @@ def tokenize_sentences(sentences, words_dict, mode = 'nltk'):
 def clear_embedding_list(model, embedding_word_dict, words_dict):
     cleared_embedding_list = []
     cleared_embedding_word_dict = {}
-
-    for word in words_dict:
+    k = 0
+    l = 0
+    for word in tqdm.tqdm(words_dict):
         if word not in embedding_word_dict:
-            continue
-        row = model[word]
-        cleared_embedding_list.append(row)
-        cleared_embedding_word_dict[word] = len(cleared_embedding_word_dict)
-
+            l += 1
+            row = get_oov_vector(word,model,threshold=0.7)
+            if row is None:
+                k += 1
+                continue
+            else:
+                cleared_embedding_list.append(row)
+                cleared_embedding_word_dict[word] = len(cleared_embedding_word_dict)
+        else:
+            row = model[word]
+            cleared_embedding_list.append(row)
+            cleared_embedding_word_dict[word] = len(cleared_embedding_word_dict)
+    print('embeddings not found: {0:.1f}%'.format(l / len(words_dict) * 100))
+    print('embeddings not synthesized: {0:.1f}%'.format(k/len(words_dict)*100))
     return cleared_embedding_list, cleared_embedding_word_dict
 
 def get_bad_sentences(vlosses, vlogits, X_valid, Y_valid):
@@ -109,20 +117,22 @@ def convert_tokens_to_ids(tokenized_sentences, words_list, embedding_word_dict, 
 
 
 print("Tokenizing sentences in train set...")
-tokenized_sentences_train, words_dict = tokenize_sentences(sentences_train, {})
+tokenized_sentences_train, words_dict = tokenize_sentences(sentences_train, {}, mode='twitter')
 
 #print("Tokenizing sentences in validation set...")
 #tokenized_sentences_valid, words_dict = tokenize_sentences(sentences_valid, words_dict)
 
 print("Tokenizing sentences in test set...")
-tokenized_sentences_test, words_dict = tokenize_sentences(sentences_test, words_dict)
+tokenized_sentences_test, words_dict = tokenize_sentences(sentences_test, words_dict, mode='twitter')
 
 words_dict[UNKNOWN_WORD] = len(words_dict)
+
+
+
 
 print("Loading embeddings...")
 #embedding_list, embedding_word_dict = read_embedding_list('assets/embedding_models/ft_300d_crawl/crawl-300d-2M.vec')
 #embedding_size = len(embedding_list[0])
-
 model = KeyedVectors.load_word2vec_format('assets/embedding_models/ft_300d_crawl/crawl-300d-2M.vec', binary=False)
 embedding_word_dict = {w:ind for ind,w in enumerate(model.index2word)}
 embedding_size = 300
@@ -146,27 +156,23 @@ train_list_of_token_ids = convert_tokens_to_ids(tokenized_sentences_train,id_to_
 
 test_list_of_token_ids = convert_tokens_to_ids(tokenized_sentences_test,id_to_word,embedding_word_dict,MAXLEN)
 
-X_train = np.array(train_list_of_token_ids)
-#X_valid = np.array(valid_list_of_token_ids)
+X = np.array(train_list_of_token_ids)
+X_test = np.array(test_list_of_token_ids)
 
 
-fold_size = len(X_train) // 10
+fold_size = len(X) // 10
 models = []
 
 fold_start = 0
 fold_end = fold_start + fold_size
 
-X_valid = X_train[fold_start:fold_end]
-Y_valid = Y_train[fold_start:fold_end]
-X_train = np.concatenate([X_train[:fold_start], X_train[fold_end:]])
-Y_train = np.concatenate([Y_train[:fold_start], Y_train[fold_end:]])
+X_valid = X[fold_start:fold_end]
+Y_valid = Y[fold_start:fold_end]
+X_train = np.concatenate([X[:fold_start], X[fold_end:]])
+Y_train = np.concatenate([Y[:fold_start], Y[fold_end:]])
 
 
 
-#X_train, X_valid, Y_train, Y_valid = train_test_split(X_train, Y_train, test_size=0.2, random_state=1)
-X_test = np.array(test_list_of_token_ids)
-
-print(X_train[3][:10])
 #X_train, Y_train = mixup(X_train,Y_train,2,0.1, seed=23)
 
 
@@ -185,7 +191,7 @@ with graph.as_default():
     keep_prob = tf.placeholder(dtype=tf.float32, name="input_keep_prob")
     with tf.name_scope("Embedding"):
         #embedding = tf.get_variable("embedding", [len(tokenizer.word2index), 100], dtype=tf.float32,initializer=tf.constant_initializer(pre_embedding), trainable=False)
-        embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+        embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=True)
         embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
 
     """
@@ -232,7 +238,7 @@ with graph.as_default():
 
     loss = binary_crossentropy(y,logits)
     cost = tf.losses.log_loss(predictions=logits, labels=y)
-    loss2 = tf.losses.sigmoid_cross_entropy(y,logits)
+    #loss = tf.losses.sigmoid_cross_entropy(y,logits)
     #optimizer = tf.train.AdamOptimizer(learning_rate=0.001).minimize(cost)
 
     optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(loss)
@@ -307,7 +313,7 @@ with tf.Session(graph=graph) as sess:
 
         sample_submission[list_classes] = res
 
-        dir_name = 'pavel27/'
+        dir_name = 'pavel30/'
         if not os.path.exists('submissions/' + dir_name):
             os.mkdir('submissions/' + dir_name)
         fn = "submissions/"

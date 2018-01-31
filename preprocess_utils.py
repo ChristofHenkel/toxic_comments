@@ -9,7 +9,8 @@ from nltk.tokenize import word_tokenize
 # Tweet tokenizer does not split at apostophes which is what we want
 from nltk.tokenize import TweetTokenizer
 import logging
-from utils import load_bad_words
+from utilities import load_bad_words
+import tqdm
 
 logging.basicConfig(level=logging.INFO)
 
@@ -28,7 +29,7 @@ class CNNTransformer:
 
         pass
 
-    def create_vocabulary(self, texts, keep=0.9, min_count = 10):
+    def create_char_vocabulary(self, texts, keep=0.9, min_count = 10):
         counter = collections.Counter()
         for k, text in enumerate(texts):
             counter.update(text)
@@ -68,7 +69,7 @@ class CNNTransformer:
 
 
 
-class Tokenizer:
+class Preprocessor:
 
     def __init__(self,max_number_of_words = None,min_count_words=5,keep_words=0.9,min_count_chars=20,keep_chars = 0.9):
         self.tokenize_mode = 'keras'
@@ -393,16 +394,19 @@ class Tokenizer:
         for k, text in enumerate(texts):
             counter.update(text)
         if self.keep_chars:
+            logging.info('keeping top %s percent characters' % self.keep_chars * 100)
             raw_counts = counter.most_common(int(self.keep_chars*len(counter)))
         else:
             raw_counts = list(counter.items())
-
+        logging.info('%s remaining characters' %len(counter))
+        logging.info('keepin characters with count > %s' % self.min_count_chars)
         vocab = [char_tuple[0] for char_tuple in raw_counts if char_tuple[1] > self.min_count_chars]
         self.char2index = {char:(ind+1) for ind, char in enumerate(vocab)}
-        self.char2index[self.unknown_char] = len(self.char2index)+1
-        self.char2index[self.pad_char] = len(self.char2index)+1
+        self.char2index[self.unknown_char] = 0
+        self.char2index[self.pad_char] = -1
         self.index2char = {ind:char for char, ind in self.char2index.items()}
         self.char_vocab_size = len(self.char2index)
+        logging.info('%s remaining characters' % self.char_vocab_size)
 
     def initial_cleaning(self,text):
         text = self.lower(text)
@@ -485,6 +489,23 @@ class Tokenizer:
 
     def _get_word_index(self):
         pass
+
+    def char2seq(self, texts, maxlen):
+        res = np.zeros((len(texts),maxlen))
+        for k,text in tqdm.tqdm(enumerate(texts)):
+            seq = np.zeros((len(text)))
+            for l, char in enumerate(text):
+                try:
+                    id = self.char2index[char]
+                    seq[l] = id
+                except KeyError:
+                    seq[l] = self.char2index[self.unknown_char]
+            seq = seq[:maxlen]
+            res[k][:len(seq)] = seq
+        return res
+
+
+
 
 
 

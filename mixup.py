@@ -13,6 +13,7 @@ from textblob import TextBlob
 from textblob.translate import NotTranslated
 import pandas as pd
 from sklearn.utils import shuffle
+from nltk.corpus import wordnet as wn
 
 def mixup_old( X, Y,alpha, portion):
     size = int(len(X) * portion)
@@ -72,33 +73,6 @@ def mixup( X_train, Y_train,alpha, portion, seed):
     # return X_new[indices3], Y_new[indices3]
     return  X_new, Y_new
 
-def translate_translate(comment):
-    if hasattr(comment, "decode"):
-        comment = comment.decode("utf-8")
-
-    text = TextBlob(comment)
-    try:
-        text = text.translate(to='de')
-        text = text.translate(to='fr')
-        text = text.translate(to='es')
-        text = text.translate(to="en")
-    except NotTranslated:
-        pass
-
-    return str(text)
-
-def translate_job():
-
-
-    train_data = pd.read_csv("assets/raw_data/train.csv")
-    comments_list = train_data["comment_text"].fillna("_NAN_").values
-    print('Translate comments')
-    #parallel = Parallel(5, backend="threading", verbose=5)
-    #translated_data = parallel(delayed(translate_translate)(comment) for comment in comments_list)
-    translated_data = [translate_translate(comment) for comment in tqdm.tqdm(comments_list)]
-
-    train_data["comment_text"] = translated_data
-    train_data.to_csv("assets/raw_data/train_de_fr_es.csv", index=False)
 
 def augment_with_translation_adhoc(list_of_sentences, portion):
 
@@ -125,7 +99,7 @@ def augment_with_translation_adhoc(list_of_sentences, portion):
     list_of_sentences.extend(new_sentences)
     return random.shuffle(list_of_sentences)
 
-def augmented_with_translation_disk(train_data, portion, seed = 43):
+def augmented_with_translation(train_data, portion, seed = 43, shuffle_result = True):
 
     train_data_fr = pd.read_csv("assets/raw_data/train_fr.csv")
     train_data_de = pd.read_csv("assets/raw_data/train_de.csv")
@@ -137,12 +111,18 @@ def augmented_with_translation_disk(train_data, portion, seed = 43):
     frac = (train_data.shape[0] * portion) / data.shape[0]
     data = data.sample(frac = frac, random_state=seed)
     data = pd.concat([train_data, data])
-
-    data = data.sample(frac=1, random_state=seed)
+    if shuffle_result:
+        data = data.sample(frac=1, random_state=seed)
     return data
 
-if __name__ == '__main__':
-
-    translate_job()
-
-
+#for synset in wn.synsets('cat'):
+#    for lemma in synset.lemmas():
+#        print(lemma.name())##
+#
+#a = wn.synsets('dog')
+#wn.synsets('cat').lemma_names()
+#
+#from thesaurus import Word#
+#
+#w = Word('fuck')
+#w.synonyms(relevance=[2,3])

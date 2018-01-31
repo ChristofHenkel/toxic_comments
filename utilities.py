@@ -4,7 +4,9 @@ import os
 import pandas as pd
 from gensim.models.fasttext import FastText
 import numpy as np
-
+from gensim import utils
+from six import string_types, iteritems
+import tqdm
 
 labels = ['identity_hate', 'insult', 'obscene', 'severe_toxic', 'threat', 'toxic']
 label2id = {name:id for id,name in enumerate(labels)}
@@ -118,30 +120,81 @@ def load_glove_embedding(word_index,dims = 100,max_features=1000000):
 
 
 
+def get_oov_vector(word, model,dim = 300,minn=3, maxn = 6, threshold = 0.8):
+    def get_ngrams(word, minn=3, maxn=6):
+        def _get_gram(text, n):
+            return [text[i:i + n] for i in range(len(text) - n + 1)]
 
-def list_seq2word_dict(list_seq,word2index):
-    index2word = {ind:w for w, ind in word2index.items()}
-
-X_test = np.zeros((154361,100))
-
-bsize = 512
-num_batches = (len(X_test) // bsize) + 1
-len_last_batch = len(X_test) % bsize
-
-pad = np.zeros(shape=(len_last_batch,X_test.shape[1]))
-X_te2 = np.concatenate((X_test,pad))
-
-res = np.zeros((len(X_test), 6))
-for s in range(num_batches):
-
-    batch_x_test = X_test[s * bsize:(s + 1) * bsize]
-    if s == num_batches-1:
-        pad_size = bsize-batch_x_test.shape[0]
-        pad = np.zeros(shape=(pad_size, X_test.shape[1]))
-        batch_x_test = np.concatenate((batch_x_test,pad))
-    print([batch_x_test.shape,s])
-
-    if s is not num_batches-1:
-        res[s * bsize:(s + 1) * bsize] = [1,2,3,4,5,6]
+        ngrams = []
+        for n in range(minn, min(len(word) - 1, maxn) + 1):
+            ngrams.extend(_get_gram(word, n))
+        return ngrams
+    ngrams = get_ngrams(word,minn=minn, maxn = maxn)
+    vec = np.zeros(dim, dtype=np.float32)
+    k = 0
+    for gram in ngrams:
+        try:
+            vec += model[gram]
+            k += 1
+        except:
+            pass
+    if k != 0:
+        vec /= k
+        if k / (len(ngrams)+1) > threshold:
+            return vec
     else:
-        res[s * bsize:bsize-pad_size] = [1,2,3,4,5,6]
+        return None
+
+
+def save_mini_fasttext_format(model, fname, words_dict, binary=False):
+    """
+    Store the input-hidden weight matrix in the same format used by the original
+    C word2vec-tool, for compatibility.
+
+     `fname` is the file used to save the vectors in
+     `fvocab` is an optional file used to save the vocabulary
+     `binary` is an optional boolean indicating whether the data is to be saved
+     in binary word2vec format (default: False)
+     `total_vec` is an optional parameter to explicitly specify total no. of vectors
+     (in case word vectors are appended with document vectors afterwards)
+
+    """
+
+    total_vec = len(model.vocab)
+    vector_size = model.syn0.shape[1]
+    print("storing %sx%s projection weights into %s", total_vec, vector_size, fname)
+    assert (len(model.vocab), vector_size) == model.syn0.shape
+    with utils.smart_open(fname, 'wb') as fout:
+        fout.write(utils.to_utf8("%s %s\n" % (total_vec, vector_size)))
+        # store in sorted order: most frequent words at the top
+        for word, vocab in sorted(iteritems(model.vocab), key=lambda item: -item[1].count):
+            if word in words_dict:
+                row = model.syn0[vocab.index]
+                if binary:
+                    fout.write(utils.to_utf8(word) + b" " + row.tostring())
+                else:
+                    fout.write(utils.to_utf8("%s %s\n" % (word, ' '.join("%f" % val for val in row))))
+
+def coverage(tokenized_sentences, embedding_word_dict):
+    k = 0
+    l = 0
+    for tokenized_sentence in tqdm.tqdm(tokenized_sentences):
+        for token in tokenized_sentence:
+            l += 1
+            if id_to_word[token] not in embedding_word_dict:
+                k += 1
+    print('embeddings not found: {0:.1f}%'.format(k / l * 100))
+
+"""
+import subprocess
+
+cmds = ['/home/christof/fastText-0.1.0/fasttext', 'print-word-vectors', '/home/christof/test.bin']
+
+interactive_model = subprocess.Popen(cmds, stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+
+# write into stdin
+interactive_model.stdin.write(b'hello\n')
+
+# read stdout
+result = interactive_model.stdout.readline()
+"""
