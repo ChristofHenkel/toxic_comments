@@ -7,6 +7,7 @@ import numpy as np
 from gensim import utils
 from six import string_types, iteritems
 import tqdm
+from thesaurus import Word
 
 labels = ['identity_hate', 'insult', 'obscene', 'severe_toxic', 'threat', 'toxic']
 label2id = {name:id for id,name in enumerate(labels)}
@@ -185,16 +186,21 @@ def coverage(tokenized_sentences, embedding_word_dict):
                 k += 1
     print('embeddings not found: {0:.1f}%'.format(k / l * 100))
 
-"""
-import subprocess
 
-cmds = ['/home/christof/fastText-0.1.0/fasttext', 'print-word-vectors', '/home/christof/test.bin']
+def get_synonyms(words_dict):
+    word_syns = {}
+    for w in tqdm.tqdm(words_dict):
+        word = Word(w)
+        try:
+            syns = word.synonyms(relevance=3)
+        except:
+            syns = None
+        if syns is not None:
+            word_syns[w] = syns
+    return word_syns
 
-interactive_model = subprocess.Popen(cmds, stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+def write_syns():
+    raw_counts = list(tc.word_counter.items())
+    vocab = [char_tuple[0] for char_tuple in raw_counts if char_tuple[1] > 100]
+    word_syns = get_synonyms(vocab)
 
-# write into stdin
-interactive_model.stdin.write(b'hello\n')
-
-# read stdout
-result = interactive_model.stdout.readline()
-"""

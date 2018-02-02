@@ -35,42 +35,20 @@ with graph.as_default():
     is_training = tf.placeholder(tf.bool, [], name='is_training')
 
     embedding = tf.get_variable("embedding", [preprocessor.char_vocab_size, 300], dtype=tf.float32)
-    embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+    x2 = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
 
-    x2 = tf.layers.conv1d(embedded_input, filters=8, kernel_size=3, strides=1, activation=tf.nn.elu)
-    x2 = tf.layers.conv1d(x2, filters=8, kernel_size=3, strides=1, activation=tf.nn.elu)
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=16, kernel_size=3, strides=1, activation=tf.nn.elu)
+    for i in range(3,10):
+        x2 = tf.layers.conv1d(x2, filters=2**i, kernel_size=3, strides=1)
+        #x2 = tf.layers.batch_normalization(x2, axis = 2,training=is_training,renorm_momentum=0.9)
+        x2 = tf.contrib.layers.batch_norm(x2, is_training=is_training,decay=0.9, updates_collections=None)
+        x2 = tf.nn.elu(x2)
+        x2 = tf.layers.conv1d(x2, filters=2**i, kernel_size=3, strides=1)
+        #x2 = tf.layers.batch_normalization(x2, axis = 2,training=is_training,renorm_momentum=0.9)
+        x2 = tf.contrib.layers.batch_norm(x2, is_training=is_training, decay=0.9, updates_collections=None)
+        x2 = tf.nn.elu(x2)
+        x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
 
-    x2 = tf.layers.conv1d(x2, filters=16, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=32, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.conv1d(x2, filters=32, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=64, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.conv1d(x2, filters=64, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=128, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.conv1d(x2, filters=128, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=256, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.conv1d(x2, filters=256, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=512, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.conv1d(x2, filters=512, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.reduce_mean(x2, axis=1)
+    x2 = tf.reduce_max(x2, axis=1)
     #x2 = tf.layers.flatten(x2)
     #x2 = tf.contrib.layers.fully_connected(x2, 1024, activation_fn=tf.nn.relu)
     #x2 = tf.contrib.layers.fully_connected(x2, 256, activation_fn=tf.nn.relu)
@@ -79,6 +57,7 @@ with graph.as_default():
 
     loss = binary_crossentropy(y, logits)
     cost = tf.losses.log_loss(labels=y,predictions=logits)
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(loss)
 
 bsize = 512
