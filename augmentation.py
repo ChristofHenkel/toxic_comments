@@ -10,6 +10,7 @@ import tqdm
 import pandas as pd
 from sklearn.utils import shuffle
 import pickle
+import random
 
 
 def mixup( X_train, Y_train,alpha, portion, seed):
@@ -62,12 +63,17 @@ def retranslation(train_data, portion, seed = 43, shuffle_result = True):
         data = data.sample(frac=1, random_state=seed)
     return data
 
-def synonyms(tokenized_sentences, portion):
+def synonyms(tokenized_sentences,Y_train, portion):
     with open('word_syns.p', 'rb') as f:
         word_syns = pickle.load(f)
 
     new_sentences = []
-    for sentence in np.random.choice(tokenized_sentences,int(len(tokenized_sentences)*portion),replace=False):
+    new_Y = []
+    Y_train = list(Y_train)
+    indices = random.sample(range(len(tokenized_sentences)),int(len(tokenized_sentences)*portion))
+    s_to_check = [tokenized_sentences[k] for k in indices]
+    y_to_check= [Y_train[k] for k in indices]
+    for k,sentence in enumerate(s_to_check):
         new_sentence = [w for w in sentence]
         replaceable_indices = [ind for ind, w in enumerate(sentence) if w in word_syns]
         if replaceable_indices != []:
@@ -80,14 +86,18 @@ def synonyms(tokenized_sentences, portion):
                 try:
                     new_word = syns[syn_id]
                 except:
-                    new_word = syns[:-1]
+                    try:
+                        new_word = syns[-1]
+                    except:
+                        new_word = []
                 if new_word != []:
                     new_sentence[i] = new_word
             if len(inds) > 0:
                 new_sentences.append(new_sentence)
-
+                new_Y.append(y_to_check[k])
     tokenized_sentences.extend(new_sentences)
-    return tokenized_sentences
+    Y_train.extend(new_Y)
+    return tokenized_sentences, Y_train
 
 
 

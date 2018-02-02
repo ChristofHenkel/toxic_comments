@@ -40,7 +40,7 @@ class Config:
 
 class ToxicComments:
 
-    def __init__(self):
+    def __init__(self,Config):
         self.preprocessor = Preprocessor()
         self.cfg = Config()
         self.word_counter = Counter()
@@ -50,6 +50,7 @@ class ToxicComments:
 
         self.sentences_train = self.train_data["comment_text"].fillna("_NAN_").values
         self.sentences_test = self.test_data["comment_text"].fillna("_NAN_").values
+        self.sentences_valid = None
 
     def get_augmented_data(self):
         if self.cfg.do_augmentation_with_translate:
@@ -89,6 +90,18 @@ class ToxicComments:
                 seq.append(words_dict[token])
             sequences.append(seq)
         return sequences
+
+    def update_words_dict(self,tokenized_sentences):
+        self.words_dict.pop(unknown_word, None)
+        k = 0
+        for sentence in tokenized_sentences:
+            for token in sentence:
+                if token not in self.words_dict:
+                    k += 1
+                    self.words_dict[token] = len(self.words_dict)
+        print('{} words added'.format(k))
+        self.words_dict[unknown_word] = len(self.words_dict)
+        self.id2word = dict((id, word) for word, id in self.words_dict.items())
 
     def clear_embedding_list(self,model, embedding_word_dict, words_dict):
         cleared_embedding_list = []
@@ -155,7 +168,7 @@ class ToxicComments:
         if mode == 'fasttext_300d':
             model = KeyedVectors.load_word2vec_format('assets/embedding_models/ft_300d_crawl/crawl-300d-2M.vec', binary=False)
         elif mode == 'mini_fasttext_300d':
-            model = KeyedVectors.load_word2vec_format('assets/embedding_models/ft_300d_crawl/mini_fasttext_300d.vec',binary=False)
+            model = KeyedVectors.load_word2vec_format('assets/embedding_models/ft_300d_crawl/mini_fasttext_300d2.vec',binary=False)
 
         else:
             model = None
@@ -178,17 +191,25 @@ class ToxicComments:
         id_to_embedded_word = dict((id, word) for word, id in embedding_word_dict.items())
         return embedding_matrix, embedding_word_dict, id_to_embedded_word
 
-    def fit_tokenizer(self):
+    def fit_tokenizer(self,with_valid = False):
         print("Tokenizing sentences in train set...")
         tokenized_sentences_train, self.words_dict = self.tokenize_sentences(self.sentences_train, {})
+
 
         print("Tokenizing sentences in test set...")
         tokenized_sentences_test, self.words_dict = self.tokenize_sentences(self.sentences_test, self.words_dict)
 
+        if with_valid:
+            print("Tokenizing sentences in valid set...")
+            tokenized_sentences_valid, self.words_dict = self.tokenize_sentences(self.sentences_valid, self.words_dict)
+
         self.words_dict[unknown_word] = len(self.words_dict)
         self.id2word = dict((id, word) for word, id in self.words_dict.items())
 
-        return tokenized_sentences_train, tokenized_sentences_test
+        if with_valid:
+            return tokenized_sentences_train, tokenized_sentences_valid, tokenized_sentences_test
+        else:
+            return tokenized_sentences_train, tokenized_sentences_test
 
 
 
@@ -244,7 +265,7 @@ class Model:
                 tic = time.time()
                 costs = []
                 step = 0
-                tf.initialize_local_variables().run(session=sess)
+                tf.local_variables_initializer().run(session=sess)
                 while step * self.cfg.bsize < train_iters:
                     batch_x = X_train[step * self.cfg.bsize:(step + 1) * self.cfg.bsize]
                     batch_y = Y_train[step * self.cfg.bsize:(step + 1) * self.cfg.bsize]
@@ -260,7 +281,7 @@ class Model:
                 vstep = 0
                 vcosts = []
                 vlosses = np.asarray([])
-                tf.initialize_local_variables().run(session=sess)
+                tf.local_variables_initializer().run(session=sess)
                 while vstep * self.cfg.bsize < valid_iters:
                     batch_x_valid = X_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
                     batch_y_valid = Y_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
@@ -336,7 +357,7 @@ def train_folds(fold_count=10):
         m.set_graph(embedding_matrix)
         m.train(X_train, Y_train, X_valid, Y_valid, X_test, fold_id)
 
-def train_once(fold_id = 0):
+def train_once(X,Y,embedding_matrix,fold_id = 0):
 
     fold_size = len(X) // 10
 
@@ -352,22 +373,57 @@ def train_once(fold_id = 0):
     m.train(X_train,Y_train,X_valid,Y_valid,X_test,fold_id)
 
 
-
-cfg = Config()
-
-tc = ToxicComments()
-tokenized_sentences_train, tokenized_sentences_test = tc.fit_tokenizer()
-sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
-sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
-embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
-
-train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train,embedding_word_dict)
-test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
-
-X = np.array(train_list_of_token_ids)
-Y = tc.train_data[list_classes].values
+def test_syns(fold_id = 0):
 
 
 
-X_test = np.array(test_list_of_token_ids)
-train_once(fold_id = 0)
+    tc = ToxicComments(Config)
+
+    sentences = tc.sentences_train
+
+    fold_size = len(sentences) // 10
+
+    fold_start = 0
+    fold_end = fold_start + fold_size
+
+    Y = tc.train_data[list_classes].values
+    Y_valid = Y[fold_start:fold_end]
+    Y_train = np.concatenate([Y[:fold_start], Y[fold_end:]])
+
+    sentences_valid = sentences[fold_start:fold_end]
+    sentences_train = np.concatenate([sentences[:fold_start], sentences[fold_end:]])
+
+    tc.sentences_train = sentences_train
+    tc.sentences_valid = sentences_valid
+    tokenized_sentences_train,tokenized_sentences_valid, tokenized_sentences_test = tc.fit_tokenizer(with_valid=True)
+    tokenized_sentences_train,Y_train = synonyms(tokenized_sentences_train,Y_train,0.2)
+    tc.update_words_dict(tokenized_sentences_train)
+
+    sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
+    sequences_valid = tc.tokenized_sentences2seq(tokenized_sentences_valid, tc.words_dict)
+
+    sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
+    embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
+
+    train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train, embedding_word_dict)
+    valid_list_of_token_ids = tc.convert_tokens_to_ids(sequences_valid, embedding_word_dict)
+    test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
+
+
+
+
+    X_valid = np.array(valid_list_of_token_ids)
+    X_train = np.array(train_list_of_token_ids)
+
+
+    X_test = np.array(test_list_of_token_ids)
+    m = Model(Config)
+    m.set_graph(embedding_matrix)
+    m.train(X_train,Y_train,X_valid,Y_valid,X_test,fold_id)
+
+
+
+
+
+#train_once(fold_id = 0)
+test_syns()
