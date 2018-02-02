@@ -96,7 +96,7 @@ class Preprocessor:
         self.pad_word = '<pad>'
         self.char_vocab_size = None
         self.word_vocab_size = None
-        self.bad_words, self.bad_words_synonyms = load_bad_words()
+        #self.bad_words, self.bad_words_synonyms = load_bad_words()
 
     def _get_sentence_detector(self):
         detector = nltk.data.load('tokenizers/punkt/english.pickle')

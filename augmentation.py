@@ -7,35 +7,11 @@ https://arxiv.org/abs/1710.09412
 
 import numpy as np
 import tqdm
-import random
-from joblib import Parallel, delayed
-from textblob import TextBlob
-from textblob.translate import NotTranslated
 import pandas as pd
 from sklearn.utils import shuffle
-from nltk.corpus import wordnet as wn
+import pickle
+import random
 
-def mixup_old( X, Y,alpha, portion):
-    size = int(len(X) * portion)
-    lam = np.random.beta(alpha, alpha, size)
-    lambdas = lam.reshape(size, 1)
-
-    indices = [ind for ind, x in enumerate(Y)]
-    indices1 = np.random.permutation(indices)
-    indices2 = np.random.permutation(indices1)
-
-
-    x1, x2 = X[indices1][:size], X[indices2][:size]
-    X_mixed = x1 * lambdas + x2 * (1 - lambdas)
-    y1, y2 = Y[indices1][:size], Y[indices2][:size]
-    Y_mixed = y1 * lambdas + y2 * (1 - lambdas)
-
-
-    X_new = np.concatenate((X, X_mixed))
-    Y_new = np.concatenate((Y, Y_mixed))
-    old_indices = [ind for ind, x in enumerate(Y_new)]
-    indices3 = np.random.permutation(old_indices)
-    return X_new[indices3], Y_new[indices3]
 
 def mixup( X_train, Y_train,alpha, portion, seed):
     np.random.seed(seed)
@@ -68,38 +44,10 @@ def mixup( X_train, Y_train,alpha, portion, seed):
     X_new = np.concatenate((X_train, X_mixed))
     Y_new = np.concatenate((Y_train, Y_mixed))
     X_new, Y_new = shuffle(X_new,Y_new, random_state = 42)
-    #old_indices = [ind for ind, x in enumerate(Y_new)]
-    #indices3 = np.random.permutation(old_indices)
-    # return X_new[indices3], Y_new[indices3]
     return  X_new, Y_new
 
 
-def augment_with_translation_adhoc(list_of_sentences, portion):
-
-    def translate_translate(comment, language):
-        if hasattr(comment, "decode"):
-            comment = comment.decode("utf-8")
-
-        text = TextBlob(comment)
-        try:
-            text = text.translate(to=language)
-            text = text.translate(to="en")
-        except NotTranslated:
-            pass
-
-        return str(text)
-
-    end = int(len(list_of_sentences) * portion)
-    sentences = random.choices(list_of_sentences, k=end)
-    new_sentences = []
-    for sentence in tqdm.tqdm(sentences):
-        lang = random.choice(['de','en','fr'])
-        new_sentence = translate_translate(sentence,lang)
-        new_sentences.append(new_sentence)
-    list_of_sentences.extend(new_sentences)
-    return random.shuffle(list_of_sentences)
-
-def augmented_with_translation(train_data, portion, seed = 43, shuffle_result = True):
+def retranslation(train_data, portion, seed = 43, shuffle_result = True):
 
     train_data_fr = pd.read_csv("assets/raw_data/train_fr.csv")
     train_data_de = pd.read_csv("assets/raw_data/train_de.csv")
@@ -114,6 +62,45 @@ def augmented_with_translation(train_data, portion, seed = 43, shuffle_result = 
     if shuffle_result:
         data = data.sample(frac=1, random_state=seed)
     return data
+
+def synonyms(tokenized_sentences,Y_train, portion):
+    with open('word_syns.p', 'rb') as f:
+        word_syns = pickle.load(f)
+
+    new_sentences = []
+    new_Y = []
+    Y_train = list(Y_train)
+    indices = random.sample(range(len(tokenized_sentences)),int(len(tokenized_sentences)*portion))
+    s_to_check = [tokenized_sentences[k] for k in indices]
+    y_to_check= [Y_train[k] for k in indices]
+    for k,sentence in enumerate(s_to_check):
+        new_sentence = [w for w in sentence]
+        replaceable_indices = [ind for ind, w in enumerate(sentence) if w in word_syns]
+        if replaceable_indices != []:
+            num_words = np.random.geometric(0.5)
+            num_words = min(num_words,len(replaceable_indices))
+            inds = np.random.choice(replaceable_indices,size=num_words,replace=False)
+            for i in inds:
+                syns = word_syns[sentence[i]]
+                syn_id = np.random.geometric(0.5)
+                try:
+                    new_word = syns[syn_id]
+                except:
+                    try:
+                        new_word = syns[-1]
+                    except:
+                        new_word = []
+                if new_word != []:
+                    new_sentence[i] = new_word
+            if len(inds) > 0:
+                new_sentences.append(new_sentence)
+                new_Y.append(y_to_check[k])
+    tokenized_sentences.extend(new_sentences)
+    Y_train.extend(new_Y)
+    return tokenized_sentences, Y_train
+
+
+
 
 #for synset in wn.synsets('cat'):
 #    for lemma in synset.lemmas():
