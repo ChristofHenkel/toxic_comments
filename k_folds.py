@@ -1,40 +1,27 @@
 import numpy as np
 import pandas as pd
+import os
+from operator import itemgetter
 
-def train_folds(X, y, fold_count, batch_size, get_model_func):
-    fold_size = len(X) // fold_count
-    models = []
-    for fold_id in range(0, fold_count):
-        fold_start = fold_size * fold_id
-        fold_end = fold_start + fold_size
+fname = 'pavel37'
+fp = 'submissions/' + fname + '/'
 
-        if fold_id == fold_size - 1:
-            fold_end = len(X)
+fns = os.listdir(fp)
 
-        train_x = np.concatenate([X[:fold_start], X[fold_end:]])
-        train_y = np.concatenate([y[:fold_start], y[fold_end:]])
+fns = [[fn,int(fn.split('k')[1][0]),float(fn.split('v')[1].split('t')[0])] for fn in fns]
 
-        val_x = X[fold_start:fold_end]
-        val_y = y[fold_start:fold_end]
+csv_files = []
+for k in range(10):
+    fold_fns = [fn for fn in fns if fn[1] == k]
+    best = sorted(fold_fns,key = itemgetter(2),reverse=True)[0]
+    csv_files.append(best)
 
-        model = _train_model(get_model_func(), batch_size, train_x, train_y, val_x, val_y)
-        models.append(model)
-
-    return models
-
-csv_files = ['model_e4v0.0409t0.0492.csv',
-             'model_e7v0.0403t0.0456.csv',
-             'model_e9v0.0409t0.0433.csv',
-             'model_e8v0.0406t0.0445.csv',
-             'model_e6v0.0402t0.0467.csv',
-             'model_e5v0.0405t0.0479.csv',
-]
-
+print(np.mean([fn[2] for fn in csv_files]))
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 
 test_predicts_list = []
 for csv_file in csv_files:
-    orig_submission = pd.read_csv('submissions/pavel20/' + csv_file)
+    orig_submission = pd.read_csv(fp + csv_file[0])
     predictions = orig_submission[list_classes]
     test_predicts_list.append(predictions)
 
@@ -47,4 +34,4 @@ test_predicts **= (1. / len(test_predicts_list))
 
 new_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
 new_submission[list_classes] = test_predicts
-new_submission.to_csv("submissions/pavel20/fold_e4-e9.csv", index=False)
+new_submission.to_csv("fp" + "folded.csv", index=False)

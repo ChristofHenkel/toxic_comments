@@ -3,9 +3,22 @@ from preprocess_utils import Preprocessor
 import tensorflow as tf
 from tensorflow.contrib.keras.api.keras.losses import binary_crossentropy
 import numpy as np
+import os
 
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 maxlen = 2000
+model_name = 'vgg8_1'
+root = '/home/christof/kaggle/toxic_comments/'
+fp = 'models/CCNN/' + model_name + '/'
+logs_path = fp + 'logs/'
+if not os.path.exists(root + fp):
+    os.mkdir(root + fp)
+
+
+results = pd.DataFrame(columns=['e','roc_auc_v','roc_auc_t'])
+
+
+
 
 train_data = pd.read_csv("assets/raw_data/train.csv")
 test_data = pd.read_csv("assets/raw_data/test.csv")
@@ -35,51 +48,32 @@ with graph.as_default():
     is_training = tf.placeholder(tf.bool, [], name='is_training')
 
     embedding = tf.get_variable("embedding", [preprocessor.char_vocab_size, 300], dtype=tf.float32)
-    embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+    x2 = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
 
-    x2 = tf.layers.conv1d(embedded_input, filters=8, kernel_size=3, strides=1, activation=tf.nn.elu)
-    x2 = tf.layers.conv1d(x2, filters=8, kernel_size=3, strides=1, activation=tf.nn.elu)
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=16, kernel_size=3, strides=1, activation=tf.nn.elu)
+    for i in range(3,3+7):
+        x2 = tf.layers.conv1d(x2, filters=2**i, kernel_size=3, strides=1, activation=tf.nn.elu)
+        x2 = tf.layers.conv1d(x2, filters=2**i, kernel_size=3, strides=1, activation=tf.nn.elu)
+        x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
 
-    x2 = tf.layers.conv1d(x2, filters=16, kernel_size=3, strides=1, activation=tf.nn.elu)
+    x2 = tf.reduce_max(x2, axis=1)
 
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=32, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.conv1d(x2, filters=32, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=64, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.conv1d(x2, filters=64, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=128, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.conv1d(x2, filters=128, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=256, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.conv1d(x2, filters=256, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.layers.conv1d(x2, filters=512, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.conv1d(x2, filters=512, kernel_size=3, strides=1, activation=tf.nn.elu)
-
-    x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-    x2 = tf.reduce_mean(x2, axis=1)
-    #x2 = tf.layers.flatten(x2)
-    #x2 = tf.contrib.layers.fully_connected(x2, 1024, activation_fn=tf.nn.relu)
-    #x2 = tf.contrib.layers.fully_connected(x2, 256, activation_fn=tf.nn.relu)
     x2 = tf.contrib.layers.fully_connected(x2, 64, activation_fn=tf.nn.elu)
     logits = tf.contrib.layers.fully_connected(x2, 6, activation_fn=tf.nn.sigmoid)
 
     loss = binary_crossentropy(y, logits)
     cost = tf.losses.log_loss(labels=y,predictions=logits)
     optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(loss)
+    (_, auc_update_op) = tf.contrib.metrics.streaming_auc(
+        predictions=logits,
+        labels=y,
+        curve='ROC')
+    saver = tf.train.Saver()
+
+def save(saver, sess, epoch):
+    print('saving model...', end='')
+    model_name = 'e%s.ckpt' %epoch
+    s_path = saver.save(sess, logs_path + model_name)
+    print("Model saved in file: %s" % s_path)
 
 bsize = 512
 train_iters = len(X_train) - bsize
@@ -89,10 +83,11 @@ with tf.Session(graph=graph) as sess:
     sess.run(init)
     for epoch in range(15):
         step = 0
+        tf.initialize_local_variables().run(session=sess)
         while step * bsize < train_iters:
             batch_x = X_train[step * bsize:(step + 1) * bsize]
             batch_y = Y_train[step * bsize:(step + 1) * bsize]
-            cost_ , _ = sess.run([cost,optimizer],feed_dict={x:batch_x,
+            cost_ , _, roc_auc_train = sess.run([cost,optimizer,auc_update_op],feed_dict={x:batch_x,
                                                              y:batch_y,
                                                              keep_prob:0.7,
                                                              is_training:True})
@@ -102,8 +97,9 @@ with tf.Session(graph=graph) as sess:
 
         vstep = 0
         vcosts = []
+        tf.initialize_local_variables().run(session=sess)
         while vstep * bsize < valid_iters:
-            test_cost_ = sess.run(cost, feed_dict={x: X_valid[vstep * bsize:(vstep + 1) * bsize],
+            test_cost_, roc_auc_test = sess.run([cost,auc_update_op], feed_dict={x: X_valid[vstep * bsize:(vstep + 1) * bsize],
                                                    y: Y_valid[vstep * bsize:(vstep + 1) * bsize],
                                                    keep_prob: 1,
                                                    is_training: False
@@ -112,3 +108,8 @@ with tf.Session(graph=graph) as sess:
             vcosts.append(test_cost_)
         avg_cost = np.log(np.mean(np.exp(vcosts)))
         print('valid loss: %s' % avg_cost)
+        print('roc auc test : {:.4}'.format(roc_auc_test))
+        print('roc auc train : {:.4}'.format(roc_auc_train))
+        results.loc[len(results)] = [epoch, roc_auc_test, roc_auc_train]
+        results.to_csv(fp + 'results.csv')
+        save(saver, sess, epoch)
