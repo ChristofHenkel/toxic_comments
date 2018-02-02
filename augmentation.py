@@ -77,12 +77,12 @@ def synonyms(tokenized_sentences,Y_train, portion):
         new_sentence = [w for w in sentence]
         replaceable_indices = [ind for ind, w in enumerate(sentence) if w in word_syns]
         if replaceable_indices != []:
-            num_words = np.random.geometric(0.5)
+            num_words = np.random.geometric(0.2)
             num_words = min(num_words,len(replaceable_indices))
             inds = np.random.choice(replaceable_indices,size=num_words,replace=False)
             for i in inds:
                 syns = word_syns[sentence[i]]
-                syn_id = np.random.geometric(0.5)
+                syn_id = np.random.geometric(0.8)
                 try:
                     new_word = syns[syn_id]
                 except:
@@ -101,15 +101,3 @@ def synonyms(tokenized_sentences,Y_train, portion):
 
 
 
-
-#for synset in wn.synsets('cat'):
-#    for lemma in synset.lemmas():
-#        print(lemma.name())##
-#
-#a = wn.synsets('dog')
-#wn.synsets('cat').lemma_names()
-#
-#from thesaurus import Word#
-#
-#w = Word('fuck')
-#w.synonyms(relevance=[2,3])
