@@ -464,6 +464,7 @@ class CCAPS:
 
             return logits
 
+
 class CAPS:
 
     def __init__(self):

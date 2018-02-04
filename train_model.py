@@ -37,7 +37,7 @@ class Config:
         synth_threshold = 0.1
     bsize = 512
     max_seq_len = 500
-    epochs = 15
+    epochs = 12
     model_name = 'pavel_baseline'
     root = ''
     fp = 'models/RNN/' + model_name + '/'
@@ -212,10 +212,10 @@ class Model:
             # tf Graph input
             tf.set_random_seed(1)
 
-            self.x = tf.placeholder(tf.int32, shape=(None, self.cfg.max_seq_len), name="input_x")
-            self.y = tf.placeholder(tf.float32, shape=(None,6), name="input_y")
+            self.x = tf.placeholder(tf.int32, shape=(None, self.cfg.max_seq_len), name="x")
+            self.y = tf.placeholder(tf.float32, shape=(None,6), name="y")
             #self.z = tf.placeholder(tf.float32, shape=(None, 32), name="input_z")
-            self.keep_prob = tf.placeholder(dtype=tf.float32, name="input_keep_prob")
+            self.keep_prob = tf.placeholder(dtype=tf.float32, name="keep_prob")
 
             #self.logits = model_baseline(embedding_matrix,self.x,self.keep_prob,self.z)
 
@@ -265,13 +265,15 @@ class Model:
                 labels=self.y,
                 curve='ROC',)
 
-            self.saver = tf.train.Saver()
+            self.saver = tf.train.Saver(max_to_keep=15)
 
-    def save(self, sess, fold_id, epoch):
+    def save(self, sess, fold_id, epoch,roc_auc_valid,roc_auc_train):
         print('saving model...', end='')
         model_name = 'k%s_e%s.ckpt' % (fold_id,epoch)
         s_path = self.saver.save(sess, self.cfg.logs_path + model_name)
         print("Model saved in file: %s" % s_path)
+        results.loc[len(results)] = [fold_id, epoch, roc_auc_valid, roc_auc_train]
+        results.to_csv(self.cfg.fp + 'results.csv')
 
     def train(self, X_train, Y_train, X_valid, Y_valid, X_test, fold_id=0, params=None, do_submission = True):
         sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
@@ -329,8 +331,7 @@ class Model:
                 print('roc auc train : {:.4}'.format(roc_auc_train))
                 avg_train_cost = np.log(np.mean(np.exp(costs[:valid_iters])))
                 print('train loss %s' %avg_train_cost )
-                results.loc[len(results)] = [fold_id, epoch, roc_auc_test, roc_auc_train]
-                results.to_csv(self.cfg.fp + 'results.csv')
+
                 self.save(sess,fold_id,epoch)
                 if do_submission:
                     self.populate_submission(X_test,sess,epoch, roc_auc_test,roc_auc_train, sample_submission,fold_id)
@@ -366,7 +367,7 @@ class Model:
 
 
 
-def train_folds(fold_count=10):
+def train_folds(fold_count=1):
 
     tc = ToxicComments(Config)
 
@@ -404,46 +405,40 @@ def train_folds(fold_count=10):
         m.set_graph(embedding_matrix)
         m.train(X_train, Y_train, X_valid, Y_valid, X_test, fold_id)
 
-def train_once(fold_id = 0):
+def predict(X):
+    bsize = 256
+    model = 'models/CAPS/caps_first_test/'
+    logs = model + 'logs/k0_e4'
 
-    tc = ToxicComments(Config)
+    num_batches = len(X) // bsize + 1
+    bsize_last_batch = len(X) % num_batches
+    sess = tf.InteractiveSession()
 
-    Y = train_data[list_classes].values
-    Z = np.load('assets/ccnn_8.npy')
+    # load meta graph and restore weights
+    saver = tf.train.import_meta_graph(logs + '.ckpt.meta')
+    saver.restore(sess,logs + '.ckpt')
 
-    tokenized_sentences_train, tokenized_sentences_test = tc.fit_tokenizer([sentences_train,sentences_test])
+    results = []
+    #[n.name for n in tf.get_default_graph().as_graph_def().node]
+    for b in tqdm.tqdm(range(num_batches-1)):
+        batch_x = X[b*bsize:(b+1)*bsize]
+        result = sess.run('FCCaps_layer/fully_connected/Sigmoid:0', feed_dict={'input_x:0': batch_x,
+                                                              'input_keep_prob:0': 1})
+        results.append(result)
+
+    if bsize_last_batch > 0:
+        batch_x = X[(num_batches-1) * bsize:num_batches * bsize]
+        b = bsize // bsize_last_batch + 1
+        batch_x = np.repeat(batch_x, b, axis=0)
+        batch_x = batch_x[:bsize]
+
+        result = sess.run('FCCaps_layer/fully_connected/Sigmoid:0', feed_dict={'input_x:0': batch_x,
+                                                              'input_keep_prob:0': 1})
+        results.append(result)
 
 
-    sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
-    sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
-    embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
-
-    train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train, embedding_word_dict)
-    test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
-
-    X = np.array(train_list_of_token_ids)
-    X_test = np.array(test_list_of_token_ids)
-
-    fold_size = len(X) // 10
-
-    fold_start = 0
-    fold_end = fold_start + fold_size
-
-    X_valid = X[fold_start:fold_end]
-    Y_valid = Y[fold_start:fold_end]
-    Z_valid = Z[fold_start:fold_end]
-    X_train = np.concatenate([X[:fold_start], X[fold_end:]])
-    Y_train = np.concatenate([Y[:fold_start], Y[fold_end:]])
-    Z_train = np.concatenate([Z[:fold_start], Z[fold_end:]])
-    m = Model(Config)
-    m.set_graph(embedding_matrix)
-    params = [Z_train,Z_valid]
-    m.train(X_train,Y_train,X_valid,Y_valid,X_test,fold_id,params, do_submission=False)
+    results = np.concatenate( results, axis=0 )
 
 
 
-
-
-train_folds()
-#train_once(fold_id = 0)
-#test_syns()
+    return results
