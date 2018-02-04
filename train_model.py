@@ -12,14 +12,20 @@ import os
 import time
 from preprocess_utils import Preprocessor
 from augmentation import retranslation, mixup, synonyms
-from architectures import pavel2 as model_baseline
+from architectures import BIRNN
 
-
+#model_baseline = BIRNN.rnn_cnn
 unknown_word = "_UNK_"
 end_word = "_END_"
 nan_word = "_NAN_"
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t'])
+
+train_data = pd.read_csv("assets/raw_data/train.csv")
+test_data = pd.read_csv("assets/raw_data/test.csv")
+
+sentences_train = train_data["comment_text"].fillna("_NAN_").values
+sentences_test = test_data["comment_text"].fillna("_NAN_").values
 
 class Config:
 
@@ -27,16 +33,17 @@ class Config:
     do_augmentation_with_translate = False
     do_augmentation_with_mixup = False
     do_synthezize_embeddings = False
+    if do_synthezize_embeddings:
+        synth_threshold = 0.1
     bsize = 512
     max_seq_len = 500
-    epochs = 12
-    model_name = 'rnn_1'
+    epochs = 15
+    model_name = 'pavel_baseline'
     root = ''
     fp = 'models/RNN/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
-
 
 class ToxicComments:
 
@@ -44,21 +51,9 @@ class ToxicComments:
         self.preprocessor = Preprocessor()
         self.cfg = Config()
         self.word_counter = Counter()
+        self.words_dict = {}
 
-        self.train_data = pd.read_csv("assets/raw_data/train.csv")
-        self.test_data = pd.read_csv("assets/raw_data/test.csv")
-
-        self.sentences_train = self.train_data["comment_text"].fillna("_NAN_").values
-        self.sentences_test = self.test_data["comment_text"].fillna("_NAN_").values
-        self.sentences_valid = None
-
-    def get_augmented_data(self):
-        if self.cfg.do_augmentation_with_translate:
-            train_data = augmented_with_translation(self.train_data, 0.3)
-        if self.cfg.do_augmentation_with_mixup:
-            train_data = mixup()
-
-    def tokenize_sentences(self,sentences, words_dict, mode = 'nltk'):
+    def tokenize_sentences(self,sentences, words_dict, mode = 'twitter'):
         twitter_tokenizer = TweetTokenizer()
         tokenized_sentences = []
         for sentence in tqdm.tqdm(sentences,mininterval=5):
@@ -112,7 +107,7 @@ class ToxicComments:
             if word not in embedding_word_dict:
                 if self.cfg.do_synthezize_embeddings:
                     l += 1
-                    row = get_oov_vector(word, model, threshold=0.7)
+                    row = get_oov_vector(word, model, threshold=self.cfg.synth_threshold)
                     if row is None:
                         k += 1
                         continue
@@ -129,21 +124,21 @@ class ToxicComments:
         print('embeddings not synthesized: {0:.1f}%'.format(k / len(words_dict) * 100))
         return cleared_embedding_list, cleared_embedding_word_dict
 
-    def get_bad_sentences(self,vlosses, vlogits, X_valid, Y_valid):
-        idx = (-vlosses).argsort()[:100]
-        X = X_valid[idx]
-        Y = Y_valid[idx]
-        preds = np.concatenate((Y,vlogits[idx]))
-        losses = vlosses[idx]
-        sentences = []
-        for row in X:
-            sentences.append(' '.join([id_to_embedded_word[r] for r in row]))
-        d = pd.DataFrame(preds, columns=list_classes.extend(['l' + label for label in list_classes]))
-        #d[list_classes] = Y
-        d['words'] = pd.Series(sentences)
-        d['idx'] = pd.Series(idx)
-        d['loss'] = pd.Series(losses)
-        d.to_csv('misclassifies2.csv', index=False)
+    #def get_bad_sentences(self,vlosses, vlogits, X_valid, Y_valid):
+    #    idx = (-vlosses).argsort()[:100]
+    #    X = X_valid[idx]
+    #    Y = Y_valid[idx]
+    #    preds = np.concatenate((Y,vlogits[idx]))
+    #    losses = vlosses[idx]
+    #    sentences = []
+    #    for row in X:
+    #        sentences.append(' '.join([id_to_embedded_word[r] for r in row]))
+    #    d = pd.DataFrame(preds, columns=list_classes.extend(['l' + label for label in list_classes]))
+    #    #d[list_classes] = Y
+    #    d['words'] = pd.Series(sentences)
+    #    d['idx'] = pd.Series(idx)
+    #    d['loss'] = pd.Series(losses)
+    #    d.to_csv('misclassifies2.csv', index=False)
 
     def convert_tokens_to_ids(self,tokenized_sentences, embedding_word_dict):
         words_train = []
@@ -162,7 +157,7 @@ class ToxicComments:
             words_train.append(current_words)
         return words_train
 
-    def prepare_embeddings(self, words_dict, mode = 'mini_fasttext_300d'):
+    def prepare_embeddings(self, words_dict, mode = 'fasttext_300d'):
         print("Loading embeddings...")
 
         if mode == 'fasttext_300d':
@@ -191,26 +186,17 @@ class ToxicComments:
         id_to_embedded_word = dict((id, word) for word, id in embedding_word_dict.items())
         return embedding_matrix, embedding_word_dict, id_to_embedded_word
 
-    def fit_tokenizer(self,with_valid = False):
-        print("Tokenizing sentences in train set...")
-        tokenized_sentences_train, self.words_dict = self.tokenize_sentences(self.sentences_train, {})
+    def fit_tokenizer(self,list_of_sentences):
 
-
-        print("Tokenizing sentences in test set...")
-        tokenized_sentences_test, self.words_dict = self.tokenize_sentences(self.sentences_test, self.words_dict)
-
-        if with_valid:
-            print("Tokenizing sentences in valid set...")
-            tokenized_sentences_valid, self.words_dict = self.tokenize_sentences(self.sentences_valid, self.words_dict)
+        list_of_tokenized_sentences = []
+        for sentences in list_of_sentences:
+            tokenized_sentences, self.words_dict = self.tokenize_sentences(sentences, self.words_dict)
+            list_of_tokenized_sentences.append(tokenized_sentences)
 
         self.words_dict[unknown_word] = len(self.words_dict)
         self.id2word = dict((id, word) for word, id in self.words_dict.items())
 
-        if with_valid:
-            return tokenized_sentences_train, tokenized_sentences_valid, tokenized_sentences_test
-        else:
-            return tokenized_sentences_train, tokenized_sentences_test
-
+        return list_of_tokenized_sentences
 
 
 
@@ -228,9 +214,45 @@ class Model:
 
             self.x = tf.placeholder(tf.int32, shape=(None, self.cfg.max_seq_len), name="input_x")
             self.y = tf.placeholder(tf.float32, shape=(None,6), name="input_y")
+            #self.z = tf.placeholder(tf.float32, shape=(None, 32), name="input_z")
             self.keep_prob = tf.placeholder(dtype=tf.float32, name="input_keep_prob")
 
-            self.logits = model_baseline(embedding_matrix,self.x,self.keep_prob)
+            #self.logits = model_baseline(embedding_matrix,self.x,self.keep_prob,self.z)
+
+            with tf.name_scope("Embedding"):
+                embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]],
+                                            dtype=tf.float32, initializer=tf.constant_initializer(embedding_matrix),
+                                            trainable=False)
+                embedded_input = tf.nn.embedding_lookup(embedding, self.x, name="embedded_input")
+
+            with tf.variable_scope('forward'):
+                fw_cell1 = tf.nn.rnn_cell.GRUCell(64)
+                fw_cell1 = tf.nn.rnn_cell.DropoutWrapper(fw_cell1, output_keep_prob=self.keep_prob)
+                fw_cell2 = tf.nn.rnn_cell.GRUCell(64)
+                stacked_fw_rnn = [fw_cell1, fw_cell2]
+                fw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_fw_rnn, state_is_tuple=True)
+
+            with tf.variable_scope('backward'):
+                bw_cell1 = tf.nn.rnn_cell.GRUCell(64)
+                bw_cell1 = tf.nn.rnn_cell.DropoutWrapper(bw_cell1, output_keep_prob=self.keep_prob)
+                bw_cell2 = tf.nn.rnn_cell.GRUCell(64)
+                stacked_bw_rnn = [bw_cell1, bw_cell2]
+                bw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_bw_rnn, state_is_tuple=True)
+
+            outputs, _ = tf.nn.bidirectional_dynamic_rnn(fw_multi_cell, bw_multi_cell, embedded_input, dtype=tf.float32)
+            output_fw, output_bw = outputs
+
+            outputs = tf.concat([output_fw, output_bw], axis=2)
+
+            outputs = tf.transpose(outputs, [0, 2, 1])
+
+            #outputs = tf.reduce_max(outputs, axis=2)
+            outputs = outputs[:, :, -1]
+
+            x3 = tf.contrib.layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
+            #outputs_with_cnn = tf.concat((x3, self.z), axis = 1)
+            self.logits = tf.contrib.layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+
 
             self.loss = binary_crossentropy(self.y,self.logits)
             self.cost = tf.losses.log_loss(predictions=self.logits, labels=self.y)
@@ -241,21 +263,23 @@ class Model:
             (_, self.auc_update_op) = tf.contrib.metrics.streaming_auc(
                 predictions=self.logits,
                 labels=self.y,
-                curve='ROC')
+                curve='ROC',)
 
             self.saver = tf.train.Saver()
 
-    def save(self, sess, epoch):
+    def save(self, sess, fold_id, epoch):
         print('saving model...', end='')
-        model_name = 'e%s.ckpt' % epoch
+        model_name = 'k%s_e%s.ckpt' % (fold_id,epoch)
         s_path = self.saver.save(sess, self.cfg.logs_path + model_name)
         print("Model saved in file: %s" % s_path)
 
-    def train(self, X_train, Y_train, X_valid, Y_valid, X_test, fold_id=0):
+    def train(self, X_train, Y_train, X_valid, Y_valid, X_test, fold_id=0, params=None, do_submission = True):
         sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
         train_iters = len(X_train) - self.cfg.bsize
         steps = train_iters // self.cfg.bsize
         valid_iters = len(X_valid) - self.cfg.bsize
+        #Z_train = params[0]
+        #Z_valid = params[1]
         with tf.Session(graph=self.graph) as sess:
 
             init = tf.global_variables_initializer()
@@ -269,9 +293,11 @@ class Model:
                 while step * self.cfg.bsize < train_iters:
                     batch_x = X_train[step * self.cfg.bsize:(step + 1) * self.cfg.bsize]
                     batch_y = Y_train[step * self.cfg.bsize:(step + 1) * self.cfg.bsize]
+                    #batch_z = Z_train[step * self.cfg.bsize:(step + 1) * self.cfg.bsize]
                     cost_ , _, roc_auc_train = sess.run([self.cost,self.optimizer,self.auc_update_op],
                                                         feed_dict={self.x:batch_x,
                                                                      self.y:batch_y,
+                                                                   #self.z:batch_z,
                                                                      self.keep_prob:0.7})
                     if step % 10 == 0:
                         print('e %s/%s  --  s %s/%s  -- cost %s' %(epoch,self.cfg.epochs,step,steps,cost_))
@@ -285,9 +311,11 @@ class Model:
                 while vstep * self.cfg.bsize < valid_iters:
                     batch_x_valid = X_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
                     batch_y_valid = Y_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
+                    #batch_z_valid = Z_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
                     test_cost_, valid_loss, roc_auc_test = sess.run([self.cost,self.loss,self.auc_update_op],
                                                                     feed_dict={self.x: batch_x_valid,
                                                            self.y: batch_y_valid,
+                                                           #self.z: batch_z_valid,
                                                            self.keep_prob: 1
                                                            })
                     vstep += 1
@@ -302,8 +330,10 @@ class Model:
                 avg_train_cost = np.log(np.mean(np.exp(costs[:valid_iters])))
                 print('train loss %s' %avg_train_cost )
                 results.loc[len(results)] = [fold_id, epoch, roc_auc_test, roc_auc_train]
-                results.to_csv(cfg.logs_path + 'results.csv')
-                self.populate_submission(X_test,sess,epoch, roc_auc_test,roc_auc_train, sample_submission,fold_id)
+                results.to_csv(self.cfg.fp + 'results.csv')
+                self.save(sess,fold_id,epoch)
+                if do_submission:
+                    self.populate_submission(X_test,sess,epoch, roc_auc_test,roc_auc_train, sample_submission,fold_id)
 
 
     def populate_submission(self,X_test,sess, epoch, roc_auc_test,roc_auc_train, sample_submission,fold_id):
@@ -320,7 +350,7 @@ class Model:
 
             res[s * self.cfg.bsize:(s + 1) * self.cfg.bsize] = logits_
 
-        sample_submission[self.cfg.list_classes] = res
+        sample_submission[list_classes] = res
 
         dir_name = self.cfg.model_name
         if not os.path.exists('submissions/' + dir_name):
@@ -337,6 +367,23 @@ class Model:
 
 
 def train_folds(fold_count=10):
+
+    tc = ToxicComments(Config)
+
+    Y = train_data[list_classes].values
+
+    tokenized_sentences_train, tokenized_sentences_test = tc.fit_tokenizer([sentences_train,sentences_test])
+
+    sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
+    sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
+    embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
+
+    train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train, embedding_word_dict)
+    test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
+
+    X = np.array(train_list_of_token_ids)
+    X_test = np.array(test_list_of_token_ids)
+
     fold_size = len(X) // fold_count
     for fold_id in range(0, fold_count):
         fold_start = fold_size * fold_id
@@ -357,7 +404,25 @@ def train_folds(fold_count=10):
         m.set_graph(embedding_matrix)
         m.train(X_train, Y_train, X_valid, Y_valid, X_test, fold_id)
 
-def train_once(X,Y,embedding_matrix,fold_id = 0):
+def train_once(fold_id = 0):
+
+    tc = ToxicComments(Config)
+
+    Y = train_data[list_classes].values
+    Z = np.load('assets/ccnn_8.npy')
+
+    tokenized_sentences_train, tokenized_sentences_test = tc.fit_tokenizer([sentences_train,sentences_test])
+
+
+    sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
+    sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
+    embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
+
+    train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train, embedding_word_dict)
+    test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
+
+    X = np.array(train_list_of_token_ids)
+    X_test = np.array(test_list_of_token_ids)
 
     fold_size = len(X) // 10
 
@@ -366,64 +431,19 @@ def train_once(X,Y,embedding_matrix,fold_id = 0):
 
     X_valid = X[fold_start:fold_end]
     Y_valid = Y[fold_start:fold_end]
+    Z_valid = Z[fold_start:fold_end]
     X_train = np.concatenate([X[:fold_start], X[fold_end:]])
     Y_train = np.concatenate([Y[:fold_start], Y[fold_end:]])
+    Z_train = np.concatenate([Z[:fold_start], Z[fold_end:]])
     m = Model(Config)
     m.set_graph(embedding_matrix)
-    m.train(X_train,Y_train,X_valid,Y_valid,X_test,fold_id)
-
-
-def test_syns(fold_id = 0):
-
-
-
-    tc = ToxicComments(Config)
-
-    sentences = tc.sentences_train
-
-    fold_size = len(sentences) // 10
-
-    fold_start = 0
-    fold_end = fold_start + fold_size
-
-    Y = tc.train_data[list_classes].values
-    Y_valid = Y[fold_start:fold_end]
-    Y_train = np.concatenate([Y[:fold_start], Y[fold_end:]])
-
-    sentences_valid = sentences[fold_start:fold_end]
-    sentences_train = np.concatenate([sentences[:fold_start], sentences[fold_end:]])
-
-    tc.sentences_train = sentences_train
-    tc.sentences_valid = sentences_valid
-    tokenized_sentences_train,tokenized_sentences_valid, tokenized_sentences_test = tc.fit_tokenizer(with_valid=True)
-    tokenized_sentences_train,Y_train = synonyms(tokenized_sentences_train,Y_train,0.2)
-    tc.update_words_dict(tokenized_sentences_train)
-
-    sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
-    sequences_valid = tc.tokenized_sentences2seq(tokenized_sentences_valid, tc.words_dict)
-
-    sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
-    embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
-
-    train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train, embedding_word_dict)
-    valid_list_of_token_ids = tc.convert_tokens_to_ids(sequences_valid, embedding_word_dict)
-    test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
-
-
-
-
-    X_valid = np.array(valid_list_of_token_ids)
-    X_train = np.array(train_list_of_token_ids)
-
-
-    X_test = np.array(test_list_of_token_ids)
-    m = Model(Config)
-    m.set_graph(embedding_matrix)
-    m.train(X_train,Y_train,X_valid,Y_valid,X_test,fold_id)
+    params = [Z_train,Z_valid]
+    m.train(X_train,Y_train,X_valid,Y_valid,X_test,fold_id,params, do_submission=False)
 
 
 
 
 
+train_folds()
 #train_once(fold_id = 0)
-test_syns()
+#test_syns()

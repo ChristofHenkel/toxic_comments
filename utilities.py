@@ -204,3 +204,10 @@ def write_syns():
     vocab = [char_tuple[0] for char_tuple in raw_counts if char_tuple[1] > 100]
     word_syns = get_synonyms(vocab)
 
+
+def write_config(fp,Config):
+    pass
+
+def save_runs():
+    pass
+

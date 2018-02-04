@@ -4,12 +4,15 @@ import tensorflow as tf
 from tensorflow.contrib.keras.api.keras.losses import binary_crossentropy
 import numpy as np
 import os
+from architectures import CCNN
+
+baseline = CCNN.vgg
 
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 maxlen = 2000
 DEPTH = 7
 EPOCHS = 15
-model_name = 'vgg7_2'
+model_name = 'vgg7_3'
 root = '/home/christof/kaggle/toxic_comments/'
 fp = 'models/CCNN/' + model_name + '/'
 logs_path = fp + 'logs/'
@@ -49,18 +52,7 @@ with graph.as_default():
     keep_prob = tf.placeholder(dtype=tf.float32)
     is_training = tf.placeholder(tf.bool, [], name='is_training')
 
-    embedding = tf.get_variable("embedding", [preprocessor.char_vocab_size, 300], dtype=tf.float32)
-    x2 = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
-
-
-    for i in range(3,3+DEPTH):
-        x2 = tf.layers.conv1d(x2, filters=2**i, kernel_size=3, strides=1, activation=tf.nn.elu)
-        x2 = tf.layers.conv1d(x2, filters=2**i, kernel_size=3, strides=1, activation=tf.nn.elu)
-        x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
-
-    conv_output = tf.reduce_max(x2, axis=1)
-
-    fc1 = tf.contrib.layers.fully_connected(conv_output, 64, activation_fn=tf.nn.elu)
+    fc1 = baseline(x,DEPTH,preprocessor.char_vocab_size,is_training)
     logits = tf.contrib.layers.fully_connected(fc1, 6, activation_fn=tf.nn.sigmoid)
 
     loss = binary_crossentropy(y, logits)
@@ -88,11 +80,11 @@ with tf.Session(graph=graph) as sess:
     for epoch in range(EPOCHS):
         step = 0
         tf.local_variables_initializer().run(session=sess)
-        conv_out_train = np.zeros((len(X_train),512))
+        conv_out_train = np.zeros((len(X_train),32))
         while step * bsize < train_iters:
             batch_x = X_train[step * bsize:(step + 1) * bsize]
             batch_y = Y_train[step * bsize:(step + 1) * bsize]
-            cost_ , _, roc_auc_train,conv_out_train_batch = sess.run([cost,optimizer,auc_update_op,conv_output],feed_dict={x:batch_x,
+            cost_ , _, roc_auc_train,conv_out_train_batch = sess.run([cost,optimizer,auc_update_op,fc1],feed_dict={x:batch_x,
                                                              y:batch_y,
                                                              keep_prob:0.7,
                                                              is_training:True})
@@ -104,9 +96,9 @@ with tf.Session(graph=graph) as sess:
         vstep = 0
         vcosts = []
         tf.local_variables_initializer().run(session=sess)
-        conv_out_valid = np.zeros((len(X_valid), 512))
+        conv_out_valid = np.zeros((len(X_valid), 32))
         while vstep * bsize < valid_iters:
-            test_cost_, roc_auc_test,conv_out_valid_batch = sess.run([cost,auc_update_op,conv_output], feed_dict={x: X_valid[vstep * bsize:(vstep + 1) * bsize],
+            test_cost_, roc_auc_test,conv_out_valid_batch = sess.run([cost,auc_update_op,fc1], feed_dict={x: X_valid[vstep * bsize:(vstep + 1) * bsize],
                                                    y: Y_valid[vstep * bsize:(vstep + 1) * bsize],
                                                    keep_prob: 1,
                                                    is_training: False

@@ -394,7 +394,7 @@ class Preprocessor:
         for k, text in enumerate(texts):
             counter.update(text)
         if self.keep_chars:
-            logging.info('keeping top %s percent characters' % self.keep_chars * 100)
+            logging.info('keeping top %s percent characters' % (self.keep_chars * 100))
             raw_counts = counter.most_common(int(self.keep_chars*len(counter)))
         else:
             raw_counts = list(counter.items())
