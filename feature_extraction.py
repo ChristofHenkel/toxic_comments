@@ -2,7 +2,7 @@ import matplotlib
 matplotlib.use('TkAgg')
 import pandas as pd
 import seaborn as sns
-
+from sklearn.feature_extraction.text import
 df = pd.read_csv("assets/raw_data/train.csv")
 df['total_length'] = df['comment_text'].apply(len)
 df['capitals'] = df['comment_text'].apply(lambda comment: sum(1 for c in comment if c.isupper()))

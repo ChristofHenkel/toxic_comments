@@ -12,14 +12,16 @@ import os
 import time
 from preprocess_utils import Preprocessor
 from augmentation import retranslation, mixup, synonyms
-from architectures import BIRNN
+from architectures import CNN
+import pickle
 
-#model_baseline = BIRNN.rnn_cnn
+
+model_baseline = CNN().vgg_4
 unknown_word = "_UNK_"
 end_word = "_END_"
 nan_word = "_NAN_"
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
-results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t'])
+results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
 
 train_data = pd.read_csv("assets/raw_data/train.csv")
 test_data = pd.read_csv("assets/raw_data/test.csv")
@@ -34,16 +36,17 @@ class Config:
     do_augmentation_with_mixup = False
     do_synthezize_embeddings = False
     if do_synthezize_embeddings:
-        synth_threshold = 0.1
+        synth_threshold = 0.3
     bsize = 512
     max_seq_len = 500
-    epochs = 12
-    model_name = 'pavel_baseline'
+    epochs = 13
+    model_name = 'vgg_4'
     root = ''
-    fp = 'models/RNN/' + model_name + '/'
+    fp = 'models/CNN/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
+    max_models_to_keep = 1
 
 class ToxicComments:
 
@@ -82,7 +85,10 @@ class ToxicComments:
         for sentence in tqdm.tqdm(tokenized_sentences, mininterval=5):
             seq = []
             for token in sentence:
-                seq.append(words_dict[token])
+                try:
+                    seq.append(words_dict[token])
+                except KeyError:
+                    seq.append(words_dict[unknown_word])
             sequences.append(seq)
         return sequences
 
@@ -198,7 +204,9 @@ class ToxicComments:
 
         return list_of_tokenized_sentences
 
-
+    def save(self):
+        with open(self.cfg.fp + 'tc.p','wb') as f:
+            pickle.dump(self,f)
 
 
 class Model:
@@ -206,6 +214,19 @@ class Model:
     def __init__(self, Config):
         self.cfg = Config
         self.graph = tf.Graph()
+
+    def write_config(self):
+        with open(os.path.join(self.cfg.fp, 'config.txt'), 'w') as f:
+            f.write('Baseline = {}\n'.format(model_baseline.__name__))
+            f.write('\n')
+            f.write('Config\n')
+            for line in self.class2list(Config):
+                f.write('{} = {}\n'.format(line[0], line[1]))
+
+    @staticmethod
+    def class2list(class_):
+        class_list = [[item,class_.__dict__ [item]]for item in sorted(class_.__dict__ ) if not item.startswith('__')]
+        return class_list
 
     def set_graph(self, embedding_matrix):
         with self.graph.as_default():
@@ -217,71 +238,43 @@ class Model:
             #self.z = tf.placeholder(tf.float32, shape=(None, 32), name="input_z")
             self.keep_prob = tf.placeholder(dtype=tf.float32, name="keep_prob")
 
-            #self.logits = model_baseline(embedding_matrix,self.x,self.keep_prob,self.z)
-
-            with tf.name_scope("Embedding"):
-                embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]],
-                                            dtype=tf.float32, initializer=tf.constant_initializer(embedding_matrix),
-                                            trainable=False)
-                embedded_input = tf.nn.embedding_lookup(embedding, self.x, name="embedded_input")
-
-            with tf.variable_scope('forward'):
-                fw_cell1 = tf.nn.rnn_cell.GRUCell(64)
-                fw_cell1 = tf.nn.rnn_cell.DropoutWrapper(fw_cell1, output_keep_prob=self.keep_prob)
-                fw_cell2 = tf.nn.rnn_cell.GRUCell(64)
-                stacked_fw_rnn = [fw_cell1, fw_cell2]
-                fw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_fw_rnn, state_is_tuple=True)
-
-            with tf.variable_scope('backward'):
-                bw_cell1 = tf.nn.rnn_cell.GRUCell(64)
-                bw_cell1 = tf.nn.rnn_cell.DropoutWrapper(bw_cell1, output_keep_prob=self.keep_prob)
-                bw_cell2 = tf.nn.rnn_cell.GRUCell(64)
-                stacked_bw_rnn = [bw_cell1, bw_cell2]
-                bw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_bw_rnn, state_is_tuple=True)
-
-            outputs, _ = tf.nn.bidirectional_dynamic_rnn(fw_multi_cell, bw_multi_cell, embedded_input, dtype=tf.float32)
-            output_fw, output_bw = outputs
-
-            outputs = tf.concat([output_fw, output_bw], axis=2)
-
-            outputs = tf.transpose(outputs, [0, 2, 1])
-
-            #outputs = tf.reduce_max(outputs, axis=2)
-            outputs = outputs[:, :, -1]
-
-            x3 = tf.contrib.layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
-            #outputs_with_cnn = tf.concat((x3, self.z), axis = 1)
-            self.logits = tf.contrib.layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+            self.output = model_baseline(embedding_matrix,self.x,self.keep_prob)
 
 
-            self.loss = binary_crossentropy(self.y,self.logits)
-            self.cost = tf.losses.log_loss(predictions=self.logits, labels=self.y)
-            #loss = tf.losses.sigmoid_cross_entropy(y,logits)
-            #optimizer = tf.train.AdamOptimizer(learning_rate=0.001).minimize(cost)
+            with tf.variable_scope('logits'):
+                self.logits = self.output
 
-            self.optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(self.loss)
-            (_, self.auc_update_op) = tf.contrib.metrics.streaming_auc(
-                predictions=self.logits,
-                labels=self.y,
-                curve='ROC',)
+            with tf.variable_scope('loss'):
+                self.loss = binary_crossentropy(self.y,self.logits)
+                self.cost = tf.losses.log_loss(predictions=self.logits, labels=self.y)
+                (_, self.auc_update_op) = tf.metrics.auc(predictions=self.logits,labels=self.y,curve='ROC')
 
-            self.saver = tf.train.Saver(max_to_keep=15)
+            with tf.variable_scope('optim'):
+                self.optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(self.loss)
 
-    def save(self, sess, fold_id, epoch,roc_auc_valid,roc_auc_train):
-        print('saving model...', end='')
-        model_name = 'k%s_e%s.ckpt' % (fold_id,epoch)
-        s_path = self.saver.save(sess, self.cfg.logs_path + model_name)
-        print("Model saved in file: %s" % s_path)
-        results.loc[len(results)] = [fold_id, epoch, roc_auc_valid, roc_auc_train]
+            with tf.variable_scope('saver'):
+                self.saver = tf.train.Saver(max_to_keep=self.cfg.max_models_to_keep)
+
+    def save(self, sess, fold_id, epoch,roc_auc_valid,roc_auc_train,cost_val):
+        results.loc[len(results)] = [fold_id, epoch, roc_auc_valid, roc_auc_train,cost_val]
         results.to_csv(self.cfg.fp + 'results.csv')
+        df = results.loc[results['fold_id'] == fold_id]
+        if roc_auc_valid >= df[['roc_auc_v']].apply(max, axis=0)[0]:
+            print('saving model...', end='')
+            model_name = 'k%s_e%s.ckpt' % (fold_id,epoch)
+            s_path = self.saver.save(sess, self.cfg.logs_path + model_name)
+            print("Model saved in file: %s" % s_path)
 
-    def train(self, X_train, Y_train, X_valid, Y_valid, X_test, fold_id=0, params=None, do_submission = True):
-        sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
-        train_iters = len(X_train) - self.cfg.bsize
+
+    def train(self, X_train, Y_train, X_valid, Y_valid, X_test, fold_id=0, do_submission = False):
+
+        self.write_config()
+        if do_submission:
+            sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
+        train_iters = len(X_train) - (self.cfg.bsize * 2)
         steps = train_iters // self.cfg.bsize
-        valid_iters = len(X_valid) - self.cfg.bsize
-        #Z_train = params[0]
-        #Z_valid = params[1]
+        valid_iters = len(X_valid) - (self.cfg.bsize *2)
+
         with tf.Session(graph=self.graph) as sess:
 
             init = tf.global_variables_initializer()
@@ -314,7 +307,7 @@ class Model:
                     batch_x_valid = X_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
                     batch_y_valid = Y_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
                     #batch_z_valid = Z_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
-                    test_cost_, valid_loss, roc_auc_test = sess.run([self.cost,self.loss,self.auc_update_op],
+                    test_cost_, valid_loss, roc_auc_valid = sess.run([self.cost,self.loss,self.auc_update_op],
                                                                     feed_dict={self.x: batch_x_valid,
                                                            self.y: batch_y_valid,
                                                            #self.z: batch_z_valid,
@@ -327,14 +320,14 @@ class Model:
                 toc = time.time()
                 print('time needed %s' %(toc-tic))
                 print('valid loss: %s' % avg_cost)
-                print('roc auc test : {:.4}'.format(roc_auc_test))
+                print('roc auc test : {:.4}'.format(roc_auc_valid))
                 print('roc auc train : {:.4}'.format(roc_auc_train))
                 avg_train_cost = np.log(np.mean(np.exp(costs[:valid_iters])))
                 print('train loss %s' %avg_train_cost )
 
-                self.save(sess,fold_id,epoch)
+                self.save(sess,fold_id,epoch,roc_auc_valid,roc_auc_train,avg_cost)
                 if do_submission:
-                    self.populate_submission(X_test,sess,epoch, roc_auc_test,roc_auc_train, sample_submission,fold_id)
+                    self.populate_submission(X_test,sess,epoch, roc_auc_valid,roc_auc_train, sample_submission,fold_id)
 
 
     def populate_submission(self,X_test,sess, epoch, roc_auc_test,roc_auc_train, sample_submission,fold_id):
@@ -367,7 +360,7 @@ class Model:
 
 
 
-def train_folds(fold_count=1):
+def train_folds(fold_count=10):
 
     tc = ToxicComments(Config)
 
@@ -375,17 +368,25 @@ def train_folds(fold_count=1):
 
     tokenized_sentences_train, tokenized_sentences_test = tc.fit_tokenizer([sentences_train,sentences_test])
 
+
+    with open(tc.cfg.fp + 'tc_words_dict.p','wb') as f:
+        pickle.dump(tc.words_dict,f)
+
     sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
-    sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
+    #sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
     embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
 
+    with open(tc.cfg.fp + 'embedding_word_dict.p','wb') as f:
+        pickle.dump(embedding_word_dict,f)
+
     train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train, embedding_word_dict)
-    test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
+    #test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
 
     X = np.array(train_list_of_token_ids)
-    X_test = np.array(test_list_of_token_ids)
+    #X_test = np.array(test_list_of_token_ids)
+    X_test = None
 
-    fold_size = len(X) // fold_count
+    fold_size = len(X) // 10
     for fold_id in range(0, fold_count):
         fold_start = fold_size * fold_id
         fold_end = fold_start + fold_size
@@ -405,13 +406,23 @@ def train_folds(fold_count=1):
         m.set_graph(embedding_matrix)
         m.train(X_train, Y_train, X_valid, Y_valid, X_test, fold_id)
 
-def predict(X):
+def predict(sentences_test=None, X_test=None, do_submission = False):
     bsize = 256
-    model = 'models/CAPS/caps_first_test/'
-    logs = model + 'logs/k0_e4'
+    type_ = 'models/CAPS/'
+    model = 'caps_second_test_w_synth_mixup/'
+    epoch = 'k0_e3'
+    logs = type_ + model + 'logs/' + epoch
 
-    num_batches = len(X) // bsize + 1
-    bsize_last_batch = len(X) % num_batches
+    if sentences_test is not None:
+        with open(Config().fp + 'tc.p','wb') as f:
+            tc = pickle.load(f)
+        tokenized_sentences_test = tc.tokenize_sentences(sentences_test, tc.words_dict)
+        sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
+        test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
+        X_test = np.array(test_list_of_token_ids)
+
+    num_batches = len(X_test) // bsize + 1
+    bsize_last_batch = len(X_test) % (num_batches - 1)
     sess = tf.InteractiveSession()
 
     # load meta graph and restore weights
@@ -421,24 +432,31 @@ def predict(X):
     results = []
     #[n.name for n in tf.get_default_graph().as_graph_def().node]
     for b in tqdm.tqdm(range(num_batches-1)):
-        batch_x = X[b*bsize:(b+1)*bsize]
-        result = sess.run('FCCaps_layer/fully_connected/Sigmoid:0', feed_dict={'input_x:0': batch_x,
-                                                              'input_keep_prob:0': 1})
+        batch_x = X_test[b*bsize:(b+1)*bsize]
+        result = sess.run('FCCaps_layer/fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
+                                                              'keep_prob:0': 1})
         results.append(result)
 
     if bsize_last_batch > 0:
-        batch_x = X[(num_batches-1) * bsize:num_batches * bsize]
+        batch_x = X_test[(num_batches-1) * bsize:num_batches * bsize]
         b = bsize // bsize_last_batch + 1
         batch_x = np.repeat(batch_x, b, axis=0)
         batch_x = batch_x[:bsize]
 
-        result = sess.run('FCCaps_layer/fully_connected/Sigmoid:0', feed_dict={'input_x:0': batch_x,
-                                                              'input_keep_prob:0': 1})
-        results.append(result)
+        result = sess.run('FCCaps_layer/fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
+                                                              'keep_prob:0': 1})
+        results.append(result[:bsize_last_batch])
 
 
     results = np.concatenate( results, axis=0 )
 
+    if do_submission:
+        sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
+        sample_submission[list_classes] = results
+        if not os.path.exists(type_ + model + 'submissions/'):
+            os.mkdir(type_ + model + 'submissions/')
 
-
+        fn = type_ + model + 'submissions/'
+        fn += model[:-1] + epoch + '.csv'
+        sample_submission.to_csv(fn, index=False)
     return results
