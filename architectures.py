@@ -5,6 +5,87 @@ import numpy as np
 class CNN:
 
     @staticmethod
+    def text_cnn(embedding_matrix,x,keep_prob):
+        """
+        https://github.com/dennybritz/cnn-text-classification-tf/blob/master/text_cnn.py
+        :param embedding_matrix:
+        :param x:
+        :param keep_prob:
+        :return:
+        """
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", tf.shape(embedding_matrix), dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+            #x2 = embedded_input
+        pooled_outputs = []
+        for i in range(3,6):
+            x2 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=i, strides=1,activation=tf.nn.relu)
+            x2 = tf.layers.max_pooling1d(x2, pool_size=500-i, strides=1)
+            pooled_outputs.append(x2)
+
+        h_pool = tf.concat(pooled_outputs, 2)
+        h_pool_flat = tf.layers.flatten(h_pool)
+
+        #fc1 = tf.contrib.layers.fully_connected(h_pool_flat, 64)
+        logits = tf.contrib.layers.fully_connected(h_pool_flat, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
+    def inception_1(embedding_matrix,x,keep_prob):
+        """
+        https://github.com/dennybritz/cnn-text-classification-tf/blob/master/text_cnn.py
+        :param embedding_matrix:
+        :param x:
+        :param keep_prob:
+        :return:
+        """
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", tf.shape(embedding_matrix), dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+            #x2 = embedded_input
+        pooled_outputs = []
+        for i in range(3,6):
+            x2 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=i, strides=1,activation=tf.nn.relu)
+            x2 = tf.layers.max_pooling1d(x2, pool_size=500-i, strides=1)
+            x2 = tf.nn.dropout(x2, keep_prob=keep_prob)
+            pooled_outputs.append(x2)
+
+        h_pool = tf.concat(pooled_outputs, 2)
+        h_pool_flat = tf.layers.flatten(h_pool)
+
+        #fc1 = tf.contrib.layers.fully_connected(h_pool_flat, 64)
+        logits = tf.contrib.layers.fully_connected(h_pool_flat, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
+    def inception_v3(embedding_matrix,x,keep_prob):
+        """
+        https://arxiv.org/pdf/1512.00567.pdf
+
+        :return:
+        """
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", tf.shape(embedding_matrix), dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+            #x2 = embedded_input
+        outputs = []
+        for i in range(3,6):
+            x2 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=i, strides=1,activation=tf.nn.relu)
+            #x2 = tf.layers.max_pooling1d(x2, pool_size=500-i, strides=1)
+            #x2 = tf.nn.dropout(x2, keep_prob=keep_prob)
+            outputs.append(x2)
+
+        h_pool = tf.concat(outputs, 2)
+        h_pool_flat = tf.layers.flatten(h_pool)
+
+        #fc1 = tf.contrib.layers.fully_connected(h_pool_flat, 64)
+        logits = tf.contrib.layers.fully_connected(h_pool_flat, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
     def vgg_4(embedding_matrix,x,keep_prob):
 
         depth = 4

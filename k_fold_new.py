@@ -18,7 +18,7 @@ sentences_test = test_data["comment_text"].fillna("_NAN_").values
 
 bsize = 512
 type_ = 'models/CNN/'
-model = 'vgg_4_ft_syn09/'
+model = 'text_cnn_1/'
 
 logs = type_ + model + 'logs/'
 fn_words_dict = type_ + model + 'tc_words_dict.p'
@@ -52,6 +52,7 @@ with open(fn_embedding_words_dict, 'rb') as f:
 tokenized_sentences_test, _ = tc.tokenize_sentences(sentences_test, words_dict)
 coverage(tokenized_sentences_test,embedding_word_dict)
 
+embedding_matrix = np.load(type_ + model + 'embedding.npy')
 sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, words_dict)
 tc.id2word = dict((id, word) for word, id in words_dict.items())
 
@@ -73,7 +74,8 @@ def predict(epoch, X_test, do_submission):
     #[print(n.name) for n in tf.get_default_graph().as_graph_def().node]
     for b in tqdm.tqdm(range(num_batches-1)):
         batch_x = X_test[b*bsize:(b+1)*bsize]
-        result = sess.run('fully_connected_1/Sigmoid:0', feed_dict={'x:0': batch_x,
+        result = sess.run('fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
+                                                                    'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result)
 
@@ -83,7 +85,7 @@ def predict(epoch, X_test, do_submission):
         batch_x = np.repeat(batch_x, b, axis=0)
         batch_x = batch_x[:bsize]
 
-        result = sess.run('fully_connected_1/Sigmoid:0', feed_dict={'x:0': batch_x,
+        result = sess.run('fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result[:bsize_last_batch])
     sess.close()
@@ -96,13 +98,12 @@ def predict(epoch, X_test, do_submission):
         sample_submission[list_classes] = results
         if not os.path.exists(type_ + model + 'submissions/'):
             os.mkdir(type_ + model + 'submissions/')
-
         fn = type_ + model + 'submissions/'
         fn += model[:-1] + epoch + '.csv'
         sample_submission.to_csv(fn, index=False)
     #return results
 
-for epoch in epochs[6:]:
+for epoch in epochs:
     predict(epoch, X_test, do_submission)
 
 

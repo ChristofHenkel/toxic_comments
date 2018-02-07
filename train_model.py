@@ -6,7 +6,7 @@ from collections import Counter
 from utilities import get_oov_vector
 import nltk
 from nltk.tokenize import TweetTokenizer
-from gensim.models import KeyedVectors
+from gensim.models import KeyedVectors, FastText
 import tqdm
 import os
 import time
@@ -17,7 +17,7 @@ import pickle
 from utilities import loadGloveModel, coverage
 
 
-model_baseline = CNN().vgg_4
+model_baseline = CNN().inception_1
 unknown_word = "_UNK_"
 end_word = "_END_"
 nan_word = "_NAN_"
@@ -35,14 +35,14 @@ class Config:
     max_sentence_len = 500
     do_augmentation_with_translate = False
     do_augmentation_with_mixup = False
-    do_synthezize_embeddings = True
+    do_synthezize_embeddings = False
     mode_embeddings = 'fasttext_300d'
     if do_synthezize_embeddings:
         synth_threshold = 0.7
     bsize = 512
     max_seq_len = 500
-    epochs = 15
-    model_name = 'vgg_4_ft_syn07'
+    epochs = 10
+    model_name = 'inception_v1'
     root = ''
     fp = 'models/CNN/' + model_name + '/'
     logs_path = fp + 'logs/'
@@ -50,6 +50,8 @@ class Config:
         os.mkdir(root + fp)
     max_models_to_keep = 1
     save_by_roc = False
+
+    lr = 0.0005
 
 class ToxicComments:
 
@@ -177,6 +179,9 @@ class ToxicComments:
         elif self.cfg.mode_embeddings == 'mini_fasttext_300d':
             model = KeyedVectors.load_word2vec_format('assets/embedding_models/ft_300d_crawl/mini_fasttext_300d2.vec',binary=False)
             embedding_word_dict = {w: ind for ind, w in enumerate(model.index2word)}
+        elif self.cfg.mode_embeddings == 'fasttext_wiki_300d':
+            model = FastText.load('assets/embedding_models/ft_wiki/wiki.en.bin')
+            embedding_word_dict = {w: ind for ind, w in enumerate(model.index2word)}
         elif self.cfg.mode_embeddings == 'glove_300d':
             model = loadGloveModel('assets/embedding_models/glove/glove.840B.300d.txt',dims=300)
             embedding_word_dict = {w: ind for ind, w in enumerate(model)}
@@ -245,10 +250,10 @@ class Model:
 
             self.x = tf.placeholder(tf.int32, shape=(None, self.cfg.max_seq_len), name="x")
             self.y = tf.placeholder(tf.float32, shape=(None,6), name="y")
-            #self.z = tf.placeholder(tf.float32, shape=(None, 32), name="input_z")
+            self.em = tf.placeholder(tf.float32, shape=(embedding_matrix.shape[0], embedding_matrix.shape[1]), name="em")
             self.keep_prob = tf.placeholder(dtype=tf.float32, name="keep_prob")
 
-            self.output = model_baseline(embedding_matrix,self.x,self.keep_prob)
+            self.output = model_baseline(self.em,self.x,self.keep_prob)
 
 
             with tf.variable_scope('logits'):
@@ -260,7 +265,7 @@ class Model:
                 (_, self.auc_update_op) = tf.metrics.auc(predictions=self.logits,labels=self.y,curve='ROC')
 
             with tf.variable_scope('optim'):
-                self.optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(self.loss)
+                self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.cfg.lr).minimize(self.loss)
 
             with tf.variable_scope('saver'):
                 self.saver = tf.train.Saver(max_to_keep=self.cfg.max_models_to_keep)
@@ -282,7 +287,7 @@ class Model:
             print("Model saved in file: %s" % s_path)
 
 
-    def train(self, X_train, Y_train, X_valid, Y_valid, X_test, fold_id=0, do_submission = False):
+    def train(self, X_train, Y_train, X_valid, Y_valid, X_test, embedding_matrix, fold_id=0, do_submission = False):
 
         self.write_config()
         if do_submission:
@@ -308,7 +313,7 @@ class Model:
                     cost_ , _, roc_auc_train = sess.run([self.cost,self.optimizer,self.auc_update_op],
                                                         feed_dict={self.x:batch_x,
                                                                      self.y:batch_y,
-                                                                   #self.z:batch_z,
+                                                                   self.em:embedding_matrix,
                                                                      self.keep_prob:0.7})
                     if step % 10 == 0:
                         print('e %s/%s  --  s %s/%s  -- cost %s' %(epoch,self.cfg.epochs,step,steps,cost_))
@@ -326,7 +331,7 @@ class Model:
                     test_cost_, valid_loss, roc_auc_valid = sess.run([self.cost,self.loss,self.auc_update_op],
                                                                     feed_dict={self.x: batch_x_valid,
                                                            self.y: batch_y_valid,
-                                                           #self.z: batch_z_valid,
+                                                        self.em: embedding_matrix,
                                                            self.keep_prob: 1
                                                            })
                     vstep += 1
@@ -394,7 +399,7 @@ def train_folds(fold_count=10):
     coverage(tokenized_sentences_train,embedding_word_dict)
     with open(tc.cfg.fp + 'embedding_word_dict.p','wb') as f:
         pickle.dump(embedding_word_dict,f)
-
+    np.save(tc.cfg.fp + 'embedding.npy',embedding_matrix)
     train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train, embedding_word_dict)
     #test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
 
@@ -420,7 +425,7 @@ def train_folds(fold_count=10):
 
         m = Model(Config)
         m.set_graph(embedding_matrix)
-        m.train(X_train, Y_train, X_valid, Y_valid, X_test, fold_id)
+        m.train(X_train, Y_train, X_valid, Y_valid, X_test, embedding_matrix, fold_id)
 
 def predict(sentences_test=None, X_test=None, do_submission = False):
     bsize = 512
