@@ -18,7 +18,7 @@ sentences_test = test_data["comment_text"].fillna("_NAN_").values
 
 bsize = 512
 type_ = 'models/CNN/'
-model = 'text_cnn_1/'
+model = 'inception_v1/'
 
 logs = type_ + model + 'logs/'
 fn_words_dict = type_ + model + 'tc_words_dict.p'

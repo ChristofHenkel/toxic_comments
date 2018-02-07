@@ -17,7 +17,7 @@ import pickle
 from utilities import loadGloveModel, coverage
 
 
-model_baseline = CNN().inception_1
+model_baseline = CNN().inception_2
 unknown_word = "_UNK_"
 end_word = "_END_"
 nan_word = "_NAN_"
@@ -42,7 +42,7 @@ class Config:
     bsize = 512
     max_seq_len = 500
     epochs = 10
-    model_name = 'inception_v1'
+    model_name = 'inception_2'
     root = ''
     fp = 'models/CNN/' + model_name + '/'
     logs_path = fp + 'logs/'
@@ -51,7 +51,7 @@ class Config:
     max_models_to_keep = 1
     save_by_roc = False
 
-    lr = 0.0005
+    lr = 0.0001
 
 class ToxicComments:
 
