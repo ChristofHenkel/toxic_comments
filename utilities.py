@@ -94,7 +94,7 @@ def loadGloveModel(gloveFile, dims = 100):
     with open(gloveFile,'r') as f:
         model = {}
         for line in f:
-            splitLine = line.split()
+            splitLine = line.split(' ')
             word = splitLine[0]
             embedding = np.array([float(val) for val in splitLine[1:]])
             if embedding.shape[0] == dims:
@@ -182,7 +182,7 @@ def coverage(tokenized_sentences, embedding_word_dict):
     for tokenized_sentence in tqdm.tqdm(tokenized_sentences):
         for token in tokenized_sentence:
             l += 1
-            if id_to_word[token] not in embedding_word_dict:
+            if token not in embedding_word_dict:
                 k += 1
     print('embeddings not found: {0:.1f}%'.format(k / l * 100))
 

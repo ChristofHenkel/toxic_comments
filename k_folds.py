@@ -35,3 +35,6 @@ test_predicts **= (1. / len(test_predicts_list))
 new_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
 new_submission[list_classes] = test_predicts
 new_submission.to_csv("fp" + "folded.csv", index=False)
+
+
+

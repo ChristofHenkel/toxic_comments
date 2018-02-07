@@ -14,6 +14,7 @@ from preprocess_utils import Preprocessor
 from augmentation import retranslation, mixup, synonyms
 from architectures import CNN
 import pickle
+from utilities import loadGloveModel, coverage
 
 
 model_baseline = CNN().vgg_4
@@ -34,19 +35,21 @@ class Config:
     max_sentence_len = 500
     do_augmentation_with_translate = False
     do_augmentation_with_mixup = False
-    do_synthezize_embeddings = False
+    do_synthezize_embeddings = True
+    mode_embeddings = 'fasttext_300d'
     if do_synthezize_embeddings:
-        synth_threshold = 0.3
+        synth_threshold = 0.7
     bsize = 512
     max_seq_len = 500
-    epochs = 13
-    model_name = 'vgg_4'
+    epochs = 15
+    model_name = 'vgg_4_ft_syn07'
     root = ''
     fp = 'models/CNN/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
     max_models_to_keep = 1
+    save_by_roc = False
 
 class ToxicComments:
 
@@ -111,8 +114,9 @@ class ToxicComments:
         l = 0
         for word in tqdm.tqdm(words_dict):
             if word not in embedding_word_dict:
+                l += 1
                 if self.cfg.do_synthezize_embeddings:
-                    l += 1
+
                     row = get_oov_vector(word, model, threshold=self.cfg.synth_threshold)
                     if row is None:
                         k += 1
@@ -163,17 +167,23 @@ class ToxicComments:
             words_train.append(current_words)
         return words_train
 
-    def prepare_embeddings(self, words_dict, mode = 'fasttext_300d'):
+    def prepare_embeddings(self, words_dict):
         print("Loading embeddings...")
 
-        if mode == 'fasttext_300d':
+        if self.cfg.mode_embeddings == 'fasttext_300d':
+            print('loading Fasttext 300d')
             model = KeyedVectors.load_word2vec_format('assets/embedding_models/ft_300d_crawl/crawl-300d-2M.vec', binary=False)
-        elif mode == 'mini_fasttext_300d':
+            embedding_word_dict = {w: ind for ind, w in enumerate(model.index2word)}
+        elif self.cfg.mode_embeddings == 'mini_fasttext_300d':
             model = KeyedVectors.load_word2vec_format('assets/embedding_models/ft_300d_crawl/mini_fasttext_300d2.vec',binary=False)
-
+            embedding_word_dict = {w: ind for ind, w in enumerate(model.index2word)}
+        elif self.cfg.mode_embeddings == 'glove_300d':
+            model = loadGloveModel('assets/embedding_models/glove/glove.840B.300d.txt',dims=300)
+            embedding_word_dict = {w: ind for ind, w in enumerate(model)}
         else:
             model = None
-        embedding_word_dict = {w:ind for ind,w in enumerate(model.index2word)}
+
+
         embedding_size = 300
 
         print("Preparing data...")
@@ -259,7 +269,13 @@ class Model:
         results.loc[len(results)] = [fold_id, epoch, roc_auc_valid, roc_auc_train,cost_val]
         results.to_csv(self.cfg.fp + 'results.csv')
         df = results.loc[results['fold_id'] == fold_id]
-        if roc_auc_valid >= df[['roc_auc_v']].apply(max, axis=0)[0]:
+
+        if self.cfg.save_by_roc:
+            do_save = roc_auc_valid >= df[['roc_auc_v']].apply(max, axis=0)[0]
+        else:
+            do_save = cost_val <= df[['cost_val']].apply(min, axis=0)[0]
+
+        if do_save:
             print('saving model...', end='')
             model_name = 'k%s_e%s.ckpt' % (fold_id,epoch)
             s_path = self.saver.save(sess, self.cfg.logs_path + model_name)
@@ -375,7 +391,7 @@ def train_folds(fold_count=10):
     sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
     #sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
     embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
-
+    coverage(tokenized_sentences_train,embedding_word_dict)
     with open(tc.cfg.fp + 'embedding_word_dict.p','wb') as f:
         pickle.dump(embedding_word_dict,f)
 
@@ -407,9 +423,9 @@ def train_folds(fold_count=10):
         m.train(X_train, Y_train, X_valid, Y_valid, X_test, fold_id)
 
 def predict(sentences_test=None, X_test=None, do_submission = False):
-    bsize = 256
-    type_ = 'models/CAPS/'
-    model = 'caps_second_test_w_synth_mixup/'
+    bsize = 512
+    type_ = 'models/CNN/'
+    model = 'vgg_4/'
     epoch = 'k0_e3'
     logs = type_ + model + 'logs/' + epoch
 
