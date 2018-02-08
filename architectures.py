@@ -94,17 +94,31 @@ class CNN:
 
         :return:
         """
+        num_filters = 64
 
         with tf.name_scope("Embedding"):
             #embedding = tf.get_variable("embedding", tf.shape(embedding_matrix), dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
             embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
             #x2 = embedded_input
         outputs = []
-        for i in range(3,6):
-            x2 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=i, strides=1,activation=tf.nn.relu)
-            x2 = tf.layers.max_pooling1d(x2, pool_size=500-i, strides=1)
-            x2 = tf.nn.dropout(x2, keep_prob=keep_prob)
-            outputs.append(x2)
+
+        x1 = tf.layers.conv1d(embedded_input, filters=num_filters, kernel_size=1, strides=1,activation=tf.nn.relu)
+        x1 = tf.layers.max_pooling1d(x1, pool_size=500-1, strides=1)
+        x1 = tf.nn.dropout(x1, keep_prob=keep_prob)
+        outputs.append(x1)
+
+        x2 = tf.layers.conv1d(embedded_input, filters=num_filters, kernel_size=1, strides=1,activation=tf.nn.relu)
+        x2 = tf.layers.conv1d(x2, filters=num_filters, kernel_size=3, strides=1, activation=tf.nn.relu)
+        x2 = tf.layers.max_pooling1d(x2, pool_size=500-3, strides=1)
+        x2 = tf.nn.dropout(x2, keep_prob=keep_prob)
+        outputs.append(x2)
+
+        x3 = tf.layers.conv1d(embedded_input, filters=num_filters, kernel_size=1, strides=1,activation=tf.nn.relu)
+        x3 = tf.layers.conv1d(x3, filters=num_filters, kernel_size=3, strides=1, activation=tf.nn.relu)
+        x3 = tf.layers.conv1d(x3, filters=num_filters, kernel_size=3, strides=2, activation=tf.nn.relu)
+        x3 = tf.layers.max_pooling1d(x3, pool_size=500-5, strides=1)
+        x3 = tf.nn.dropout(x3, keep_prob=keep_prob)
+        outputs.append(x3)
 
         h_pool = tf.concat(outputs, 2)
         h_pool_flat = tf.layers.flatten(h_pool)

@@ -17,7 +17,7 @@ import pickle
 from utilities import loadGloveModel, coverage
 
 
-model_baseline = CNN().inception_2
+model_baseline = CNN().vgg_4
 unknown_word = "_UNK_"
 end_word = "_END_"
 nan_word = "_NAN_"
@@ -36,13 +36,13 @@ class Config:
     do_augmentation_with_translate = False
     do_augmentation_with_mixup = False
     do_synthezize_embeddings = False
-    mode_embeddings = 'fasttext_300d'
+    mode_embeddings = 'fasttext_wiki_300d'
     if do_synthezize_embeddings:
         synth_threshold = 0.7
     bsize = 512
     max_seq_len = 500
-    epochs = 10
-    model_name = 'inception_2'
+    epochs = 15
+    model_name = 'vgg_4_ftwiki'
     root = ''
     fp = 'models/CNN/' + model_name + '/'
     logs_path = fp + 'logs/'
@@ -51,7 +51,7 @@ class Config:
     max_models_to_keep = 1
     save_by_roc = False
 
-    lr = 0.0001
+    lr = 0.001
 
 class ToxicComments:
 
@@ -136,6 +136,24 @@ class ToxicComments:
         print('embeddings not synthesized: {0:.1f}%'.format(k / len(words_dict) * 100))
         return cleared_embedding_list, cleared_embedding_word_dict
 
+    def clear_embedding_list_fasttext(self,model, words_dict):
+        cleared_embedding_list = []
+        cleared_embedding_word_dict = {}
+        k = 0
+        l = 0
+        for word in tqdm.tqdm(words_dict):
+            k+=1
+            try:
+                row = model[word]
+                cleared_embedding_list.append(row)
+                cleared_embedding_word_dict[word] = len(cleared_embedding_word_dict)
+            except KeyError:
+                l +=1
+                continue
+        print('embeddings not found: {0:.1f}%'.format(l / len(words_dict) * 100))
+        print('embeddings not synthesized: {0:.1f}%'.format(k / len(words_dict) * 100))
+        return cleared_embedding_list, cleared_embedding_word_dict
+
     #def get_bad_sentences(self,vlosses, vlogits, X_valid, Y_valid):
     #    idx = (-vlosses).argsort()[:100]
     #    X = X_valid[idx]
@@ -180,8 +198,8 @@ class ToxicComments:
             model = KeyedVectors.load_word2vec_format('assets/embedding_models/ft_300d_crawl/mini_fasttext_300d2.vec',binary=False)
             embedding_word_dict = {w: ind for ind, w in enumerate(model.index2word)}
         elif self.cfg.mode_embeddings == 'fasttext_wiki_300d':
-            model = FastText.load('assets/embedding_models/ft_wiki/wiki.en.bin')
-            embedding_word_dict = {w: ind for ind, w in enumerate(model.index2word)}
+            model = FastText.load_fasttext_format('assets/embedding_models/ft_wiki/wiki.en.bin')
+            embedding_word_dict = {w: ind for ind, w in enumerate(model.wv.index2word)}
         elif self.cfg.mode_embeddings == 'glove_300d':
             model = loadGloveModel('assets/embedding_models/glove/glove.840B.300d.txt',dims=300)
             embedding_word_dict = {w: ind for ind, w in enumerate(model)}
@@ -192,7 +210,10 @@ class ToxicComments:
         embedding_size = 300
 
         print("Preparing data...")
-        embedding_list, embedding_word_dict = self.clear_embedding_list(model, embedding_word_dict, words_dict)
+        if not self.cfg.mode_embeddings == 'fasttext_wiki_300d':
+            embedding_list, embedding_word_dict = self.clear_embedding_list(model, embedding_word_dict, words_dict)
+        else:
+            embedding_list, embedding_word_dict = self.clear_embedding_list_fasttext(model, words_dict)
 
         del model
 
