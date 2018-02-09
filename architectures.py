@@ -88,6 +88,34 @@ class CNN:
         return logits
 
     @staticmethod
+    def inception_3(embedding_matrix,x,keep_prob):
+        """
+        https://github.com/dennybritz/cnn-text-classification-tf/blob/master/text_cnn.py
+        :param embedding_matrix:
+        :param x:
+        :param keep_prob:
+        :return:
+        """
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", tf.shape(embedding_matrix), dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+            #x2 = embedded_input
+        pooled_outputs = []
+        for i in [1,3,5,7]:
+            x2 = tf.layers.conv1d(embedded_input, filters=64, kernel_size=i, strides=1,activation=tf.nn.elu)
+            x2 = tf.layers.max_pooling1d(x2, pool_size=500-i, strides=1)
+            x2 = tf.nn.dropout(x2, keep_prob=keep_prob)
+            pooled_outputs.append(x2)
+
+        h_pool = tf.concat(pooled_outputs, 2)
+        h_pool_flat = tf.layers.flatten(h_pool)
+
+        #fc1 = tf.contrib.layers.fully_connected(h_pool_flat, 64)
+        logits = tf.contrib.layers.fully_connected(h_pool_flat, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
     def inception_v3(embedding_matrix,x,keep_prob):
         """
         https://arxiv.org/pdf/1512.00567.pdf
@@ -133,8 +161,8 @@ class CNN:
         depth = 4
 
         with tf.name_scope("Embedding"):
-            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
-            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
             x2 = embedded_input
 
         for i in range(3, 3 + depth):

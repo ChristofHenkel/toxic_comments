@@ -17,7 +17,7 @@ import pickle
 from utilities import loadGloveModel, coverage
 
 
-model_baseline = CNN().vgg_4
+model_baseline = CNN().inception_3
 unknown_word = "_UNK_"
 end_word = "_END_"
 nan_word = "_NAN_"
@@ -36,13 +36,13 @@ class Config:
     do_augmentation_with_translate = False
     do_augmentation_with_mixup = False
     do_synthezize_embeddings = False
-    mode_embeddings = 'fasttext_wiki_300d'
+    mode_embeddings = 'fasttext_300d'
     if do_synthezize_embeddings:
         synth_threshold = 0.7
     bsize = 512
     max_seq_len = 500
-    epochs = 15
-    model_name = 'vgg_4_ftwiki'
+    epochs = 20
+    model_name = 'inception_2_3'
     root = ''
     fp = 'models/CNN/' + model_name + '/'
     logs_path = fp + 'logs/'
@@ -51,7 +51,8 @@ class Config:
     max_models_to_keep = 1
     save_by_roc = False
 
-    lr = 0.001
+    lr = 0.0005
+    keep_prob = 0.8
 
 class ToxicComments:
 
@@ -335,7 +336,7 @@ class Model:
                                                         feed_dict={self.x:batch_x,
                                                                      self.y:batch_y,
                                                                    self.em:embedding_matrix,
-                                                                     self.keep_prob:0.7})
+                                                                     self.keep_prob:self.cfg.keep_prob})
                     if step % 10 == 0:
                         print('e %s/%s  --  s %s/%s  -- cost %s' %(epoch,self.cfg.epochs,step,steps,cost_))
                     costs.append(cost_)
