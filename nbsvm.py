@@ -24,6 +24,18 @@ vec = TfidfVectorizer(ngram_range=(1,2), tokenizer=tokenize,
 trn_term_doc = vec.fit_transform(train[COMMENT])
 test_term_doc = vec.transform(test[COMMENT])
 
+
+char_vectorizer = TfidfVectorizer(
+    sublinear_tf=True,
+    strip_accents='unicode',
+    analyzer='char',
+    ngram_range=(1, 5),
+    max_features=30000)
+char_vectorizer.fit(train[COMMENT])
+train_char_features = char_vectorizer.transform(train_text)
+
+
+
 def pr(y_i, y):
     p = x[y==y_i].sum(0)
     return (p+1) / ((y==y_i).sum()+1)
@@ -48,3 +60,6 @@ for i, j in enumerate(label_cols):
 submid = pd.DataFrame({'id': subm["id"]})
 submission = pd.concat([submid, pd.DataFrame(preds, columns=label_cols)], axis=1)
 submission.to_csv('submission.csv', index=False)
+
+classif = OneVsRestClassifier(LogisticRegression(C=4, dual=True))
+classif.fit(X, Y)
