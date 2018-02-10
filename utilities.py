@@ -211,3 +211,10 @@ def write_config(fp,Config):
 def save_runs():
     pass
 
+
+def corr_matrix(predict_list):
+    mat = np.zeros((len(predict_list),len(predict_list)))
+    for i,pred1 in enumerate(predict_list):
+        for j, pred2 in enumerate(predict_list):
+            mat[i,j] = np.prod(np.asarray([np.corrcoef(pred1[:,k], pred2[:,k])[0, 1] for k in range(6)]))
+    return mat

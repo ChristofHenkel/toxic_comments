@@ -2,6 +2,7 @@ import pandas as pd
 import os
 from scipy.interpolate import interp1d
 import numpy as np
+from utilities import corr_matrix
 
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 
@@ -11,12 +12,15 @@ new_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
 csv_files = os.listdir(input_fp)
 
 
+
+
 test_predicts_list = []
 for csv_file in csv_files:
     orig_submission = pd.read_csv(input_fp + csv_file)
     predictions = orig_submission[list_classes]
     test_predicts_list.append(predictions)
 
+corr_matrix([p.values for p in test_predicts_list])
 
 def bag_by_average(test_predicts_list):
     bagged_predicts = np.ones(test_predicts_list[0].shape)

@@ -5,15 +5,14 @@ import tensorflow as tf
 from tensorflow.contrib import layers
 from tensorflow.contrib.keras.api.keras.losses import binary_crossentropy
 from sklearn.metrics import log_loss
-from train_model import ToxicComments
 import tqdm
 import pandas as pd
 import os
-from utilities import coverage
 from sklearn.metrics import roc_auc_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import KFold
 import scipy
+from utilities import corr_matrix
 
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 list_logits = ['logits_' + c for c in list_classes]
@@ -25,6 +24,18 @@ csvs_train = ['models/CNN/inception_2_2/train_logits_folded.csv',
 dfs = [pd.read_csv(csv) for csv in csvs_train]
 xs = [df[list_logits].values for df in dfs]
 n_models = len(csvs_train)
+
+print('Corr matrix')
+print(corr_matrix(xs))
+print(' ')
+
+
+df = dfs[1].copy()
+for logit in list_logits:
+    df[logit] = df[logit].map(lambda x: 0 if x < 0.02 else 1)
+
+print(roc_auc_score(y_true=df[list_classes].values,y_score=df[list_logits].values))
+
 
 ys = [df[list_classes].values for df in dfs]
 

@@ -11,6 +11,7 @@ from nltk.tokenize import TweetTokenizer
 import logging
 from utilities import load_bad_words
 import tqdm
+from num2words import num2words
 
 logging.basicConfig(level=logging.INFO)
 
@@ -126,12 +127,12 @@ class Preprocessor:
             "hasn't": "has not",            "haven't": "have not",            "he'd": "he had",
             "he'd've": "he would have",            "he'll": "he shall",            "he'll've": "he shall have",            "he's": "he has",
             "how'd": "how did",            "how'd'y": "how do you",            "how'll": "how will",
-            "how's": "how has",            "i'd": "I had",
-            "i'd've": "I would have",
-            "i'll": "I shall",
-            "i'll've": "I shall have",
-            "i'm": "I am",
-            "i've": "I have",
+            "how's": "how has",            "i'd": "i had",
+            "i'd've": "i would have",
+            "i'll": "i shall",
+            "i'll've": "i shall have",
+            "i'm": "i am",
+            "i've": "i have",
             "isn't": "is not",
             "it'd": "it had",
             "it'd've": "it would have",
@@ -246,6 +247,7 @@ class Preprocessor:
 
     @staticmethod
     def rm_breaks(text):
+        text = text.replace('\n', ' ')
         " ".join(text.split())
         return text
 
@@ -264,6 +266,23 @@ class Preprocessor:
         text = re.sub("http://. * ","", text)
         text = re.sub("http://. * ", "", text)
         text = re.sub("www..* ", "", text)
+        return text
+
+    @staticmethod
+    def replace_numbers(text):
+
+        years = re.findall('[1-2][0-9]{3}.', text)
+        for n in years:
+            try:
+                text = text.replace(n[:-1],num2words(int(n[:-1]),to='year') + ' ')
+            except:
+                continue
+        numbers = re.findall('\d{1,2}.[^\d{3,}]', text)
+        for n in numbers:
+            try:
+                text = text.replace(n[:-1],num2words(int(n[:-1])) + ' ')
+            except:
+                continue
         return text
 
     @staticmethod
