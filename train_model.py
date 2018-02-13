@@ -10,28 +10,33 @@ from gensim.models import KeyedVectors, FastText
 import tqdm
 import os
 import time
-from preprocess_utils import Preprocessor
+from preprocess_utils import Preprocessor, preprocess
 from augmentation import retranslation, mixup, synonyms
-from architectures import CNN
+from architectures import CNN, CAPS, BIRNN
 import pickle
 from utilities import loadGloveModel, coverage
+from sklearn.model_selection import train_test_split
 
-
-model_baseline = CNN().inception_3
+model_baseline = BIRNN().pavel_all_outs
 unknown_word = "_UNK_"
 end_word = "_END_"
 nan_word = "_NAN_"
+COMMENT = "comment_text"
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
 
-train_data = pd.read_csv("assets/raw_data/train.csv")
-test_data = pd.read_csv("assets/raw_data/test.csv")
+train_data = pd.read_csv("assets/raw_data/bagging_train.csv")
 
-sentences_train = train_data["comment_text"].fillna("_NAN_").values
-sentences_test = test_data["comment_text"].fillna("_NAN_").values
+#t, v = train_test_split(train_data,test_size=0.2, random_state=123)
+#t.to_csv("assets/raw_data/bagging_train.csv")
+#v.to_csv("assets/raw_data/bagging_valid.csv")
+
+test_data = pd.read_csv("assets/raw_data/bagging_valid.csv")
+
 
 class Config:
 
+    do_preprocess = True
     max_sentence_len = 500
     do_augmentation_with_translate = False
     do_augmentation_with_mixup = False
@@ -41,18 +46,18 @@ class Config:
         synth_threshold = 0.7
     bsize = 512
     max_seq_len = 500
-    epochs = 20
-    model_name = 'inception_2_3'
+    epochs = 10
+    model_name = 'pavel_all_outs_slim'
     root = ''
-    fp = 'models/CNN/' + model_name + '/'
+    fp = 'models/RNN/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
     max_models_to_keep = 1
     save_by_roc = False
 
-    lr = 0.0005
-    keep_prob = 0.8
+    lr = 0.001
+    keep_prob = 0.7
 
 class ToxicComments:
 
@@ -270,8 +275,8 @@ class Model:
             # tf Graph input
             tf.set_random_seed(1)
 
-            self.x = tf.placeholder(tf.int32, shape=(None, self.cfg.max_seq_len), name="x")
-            self.y = tf.placeholder(tf.float32, shape=(None,6), name="y")
+            self.x = tf.placeholder(tf.int32, shape=(self.cfg.bsize, self.cfg.max_seq_len), name="x")
+            self.y = tf.placeholder(tf.float32, shape=(self.cfg.bsize,6), name="y")
             self.em = tf.placeholder(tf.float32, shape=(embedding_matrix.shape[0], embedding_matrix.shape[1]), name="em")
             self.keep_prob = tf.placeholder(dtype=tf.float32, name="keep_prob")
 
@@ -407,6 +412,12 @@ def train_folds(fold_count=10):
 
     tc = ToxicComments(Config)
 
+    if tc.cfg.do_preprocess:
+        train_data = preprocess(train_data)
+        test_data = preprocess(test_data)
+
+    sentences_train = train_data["comment_text"].fillna("_NAN_").values
+    sentences_test = test_data["comment_text"].fillna("_NAN_").values
     Y = train_data[list_classes].values
 
     tokenized_sentences_train, tokenized_sentences_test = tc.fit_tokenizer([sentences_train,sentences_test])

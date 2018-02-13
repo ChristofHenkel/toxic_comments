@@ -16,40 +16,52 @@ from sklearn.multiclass import OneVsRestClassifier
 import num2words
 
 tokenizer = TweetTokenizer()
+
 PREPROCESS = True
-train = pd.read_csv('assets/raw_data/train.csv')
-test = pd.read_csv('assets/raw_data/test.csv')
+FN_OUT_TRAIN = 'models/NBSVM/slim/nbsvm_prediction_train.csv'
+FN_OUT_TEST = 'models/NBSVM/slim/nbsvm_prediction_valid.csv'
+MODE = 'train'
+COMMENT = 'comment_text'
+
+train = pd.read_csv('assets/raw_data/bagging_train.csv')
+test = pd.read_csv('assets/raw_data/bagging_valid.csv')
 subm = pd.read_csv('assets/raw_data/sample_submission.csv')
 
 label_cols = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
+list_logits = ['logits_' + c for c in label_cols]
 train['none'] = 1-train[label_cols].max(axis=1)
 
-COMMENT = 'comment_text'
+
 train[COMMENT].fillna("unknown", inplace=True)
 test[COMMENT].fillna("unknown", inplace=True)
 train_chars = train.copy()
+test_chars = test.copy()
 
-def preprocess(train):
-    
+def preprocess(data):
+
     print('preprocessing')
     p = Preprocessor()
-    train[COMMENT] = train[COMMENT].map(lambda x: p.lower(x))
-    train[COMMENT] = train[COMMENT].map(lambda x: p.rm_breaks(x))
-    train[COMMENT] = train[COMMENT].map(lambda x: p.expand_contractions(x))
-    train[COMMENT] = train[COMMENT].map(lambda x: p.rm_ip(x))
-    train[COMMENT] = train[COMMENT].map(lambda x: p.rm_links_text(x))
-    train[COMMENT] = train[COMMENT].map(lambda x: p.replace_numbers(x))
-    train[COMMENT] = train[COMMENT].map(lambda x: p.rm_bigrams(x))
-    train[COMMENT] = train[COMMENT].str.replace(r"[^A-Za-z0-9(),!?@\'\`\"\_\n]", " ")
-    return train
-[print(train[COMMENT][i]) for i in range(20,30)]
+    data[COMMENT] = data[COMMENT].map(lambda x: p.lower(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_breaks(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.expand_contractions(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_ip(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_links_text(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.replace_numbers(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_bigrams(x))
+    data[COMMENT] = data[COMMENT].str.replace(r"[^A-Za-z0-9(),!?@\'\`\"\_\n]", " ")
+    return data
 
 
-MODE = 'test'
+
+
 
 if MODE == 'valid':
     train, valid = train_test_split(train, test_size=0.2, random_state=43)
     train_chars, valid_chars = train_test_split(train_chars, test_size=0.2, random_state=43)
+
+if PREPROCESS:
+    train = preprocess(train)
+    test = preprocess(test)
 
 n = train.shape[0]
 
@@ -79,11 +91,14 @@ if MODE == 'valid':
     valid_word_features = vec.transform(valid[COMMENT])
     valid_char_features = char_vectorizer.transform(valid_chars[COMMENT])
     preds = np.zeros((len(valid), len(label_cols)))
-else:
+elif MODE == 'test':
     print('Transforming test Tfidf')
     test_word_features = vec.transform(test[COMMENT])
-    test_char_features = char_vectorizer.transform(test[COMMENT])
+    test_char_features = char_vectorizer.transform(test_chars[COMMENT])
     preds = np.zeros((len(test), len(label_cols)))
+else:
+    preds = np.zeros((len(train), len(label_cols)))
+
 
 def pr(y_i, y, feature):
     p = feature[y==y_i].sum(0)
@@ -105,8 +120,10 @@ for i, j in enumerate(label_cols):
 
     if MODE == 'valid':
         v = hstack([valid_word_features.multiply(r2),valid_char_features.multiply(r1)])
-    else:
+    elif MODE == 'test':
         v = hstack([test_word_features.multiply(r2), test_char_features.multiply(r1)])
+    else:
+        v = hstack([train_word_features.multiply(r2), train_char_features.multiply(r1)])
 
     preds[:,i] = m.predict_proba(v)[:,1]
 
@@ -115,7 +132,20 @@ if MODE == 'valid':
     roc = roc_auc_score(y_true, preds)
     print(roc)
 
+elif MODE == 'test':
+    try:
+        a = test['toxic']
+        submission = test_chars.copy()
+        submission.drop(columns=["comment_text"])
+        submission[list_logits] = pd.DataFrame(preds, index=submission.index)
+        submission.to_csv(FN_OUT_TEST, index=False)
+    except KeyError:
+        submid = pd.DataFrame({'id': subm["id"]})
+        submission = pd.concat([submid, pd.DataFrame(preds, columns=label_cols)], axis=1)
+        submission.to_csv('models/NBSVM/nbsvm_submission.csv', index=False)
+
 else:
-    submid = pd.DataFrame({'id': subm["id"]})
-    submission = pd.concat([submid, pd.DataFrame(preds, columns=label_cols)], axis=1)
-    submission.to_csv('models/NBSVM/submission.csv', index=False)
+    submission = train_chars.copy()
+    submission.drop(columns=["comment_text"])
+    submission[list_logits] = pd.DataFrame(preds, index=submission.index)
+    submission.to_csv(FN_OUT_TRAIN, index=False)

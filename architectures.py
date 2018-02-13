@@ -364,6 +364,39 @@ class CCNN:
 class BIRNN:
 
     @staticmethod
+    def _attention_mechanism(outputs, attention_layer_size, rnn_units,maxSeqLength):
+        """
+        Attention Network to average the output of the bidirectional RNN network.
+        Small neural network, which should learn the 'importance' of an individual word for classification.
+        :param outputs: The outut of the Rnn network.
+        :param attention_layer_size: Size of the hidden layer.
+        :return: alpha-coefficients which produce an weighted average of the rnn_outputs.
+        """
+        # Reshape outputs to tensor of shape (batch_size * self.maxSeqLength, 2 * self.lstm_size)
+        # So each output from one Rnn cell is fed into the connected layer once in a time.
+        outputs = tf.reshape(outputs, [-1, 2 * rnn_units])
+        hidden_layer = layers.fully_connected(outputs, attention_layer_size, activation_fn=tf.nn.relu)
+        attention_logits = layers.fully_connected(hidden_layer, 1, activation_fn=None)
+
+        #Reshape attention_logits, such that is of the shape (batch_size, self.maxSeqLength, 1).
+        attention_logits = tf.reshape(attention_logits, [-1, maxSeqLength, 1])
+
+        # Apply softmax to the maxSeqLength dimensions, i.e. the different outputs.
+        # alphas has shape (batch_size, self.maxSeqLength, 1)
+        alphas = tf.nn.softmax(attention_logits, dim=1)
+
+        # TODO: Idea for nomalisation of the softmax.
+        # unnormed_softmax = tf.exp(attention_logits)
+        # softmax_norm = tf.reduce_sum(unnormed_softmax * batch_masking, axis=1)
+        # alphas = unnormed_softmax / softmax_norm
+
+        # Store alphas as class variable for visualization of the attentions.
+
+
+        return alphas
+
+
+    @staticmethod
     def pavel(embedding_matrix, x, keep_prob):
 
         with tf.name_scope("Embedding"):
@@ -395,6 +428,81 @@ class BIRNN:
         outputs = tf.reduce_max(outputs, axis=2)
 
         x3 = layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
+    def pavel_all_outs(embedding_matrix, x, keep_prob):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        with tf.variable_scope('forward'):
+
+            fw_cell1 = tf.nn.rnn_cell.GRUCell(64)
+            fw_cell1 = tf.nn.rnn_cell.DropoutWrapper(fw_cell1, output_keep_prob=keep_prob)
+            fw_cell2 = tf.nn.rnn_cell.GRUCell(64)
+            stacked_fw_rnn = [fw_cell1,fw_cell2]
+            fw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_fw_rnn, state_is_tuple=True)
+
+        with tf.variable_scope('backward'):
+            bw_cell1 = tf.nn.rnn_cell.GRUCell(64)
+            bw_cell1 = tf.nn.rnn_cell.DropoutWrapper(bw_cell1, output_keep_prob=keep_prob)
+            bw_cell2 = tf.nn.rnn_cell.GRUCell(64)
+            stacked_bw_rnn = [bw_cell1,bw_cell2]
+            bw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_bw_rnn, state_is_tuple=True)
+
+        outputs, _ = tf.nn.bidirectional_dynamic_rnn(fw_multi_cell, bw_multi_cell, embedded_input, dtype=tf.float32)
+        output_fw, output_bw = outputs
+
+        outputs = tf.concat([output_fw, output_bw], axis = 2)
+
+        outputs = tf.transpose(outputs, [0, 2, 1])
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last], axis=1)
+
+        #x3 = layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+
+    def pavel_attention(self,embedding_matrix, x, keep_prob):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        with tf.variable_scope('forward'):
+
+            fw_cell1 = tf.nn.rnn_cell.GRUCell(64)
+            fw_cell1 = tf.nn.rnn_cell.DropoutWrapper(fw_cell1, output_keep_prob=keep_prob)
+            fw_cell2 = tf.nn.rnn_cell.GRUCell(64)
+            stacked_fw_rnn = [fw_cell1,fw_cell2]
+            fw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_fw_rnn, state_is_tuple=True)
+
+        with tf.variable_scope('backward'):
+            bw_cell1 = tf.nn.rnn_cell.GRUCell(64)
+            bw_cell1 = tf.nn.rnn_cell.DropoutWrapper(bw_cell1, output_keep_prob=keep_prob)
+            bw_cell2 = tf.nn.rnn_cell.GRUCell(64)
+            stacked_bw_rnn = [bw_cell1,bw_cell2]
+            bw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_bw_rnn, state_is_tuple=True)
+
+        outputs, _ = tf.nn.bidirectional_dynamic_rnn(fw_multi_cell, bw_multi_cell, embedded_input, dtype=tf.float32)
+        output_fw, output_bw = outputs
+
+        outputs = tf.concat([output_fw, output_bw], axis = 2)
+
+        #outputs = tf.transpose(outputs, [0, 2, 1])
+
+        alphas = self._attention_mechanism(outputs, attention_layer_size=10,rnn_units=64,maxSeqLength=500)
+        # encodings is of shape (batch_size, 2 * self.lstm_size)
+        encodings = tf.reduce_sum(alphas * outputs, 1)
+
+        x3 = layers.fully_connected(encodings, 32, activation_fn=tf.nn.relu)
         logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
@@ -807,8 +915,8 @@ class CAPS:
 
 
         with tf.name_scope("Embedding"):
-            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
-            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
 
 
         with tf.variable_scope('Conv1_layer'):
@@ -844,6 +952,49 @@ class CAPS:
             logits = tf.contrib.layers.fully_connected(flat_capsules, 6, activation_fn=tf.nn.sigmoid)
 
             return logits
+
+    def caps_4(self,embedding_matrix, x, keep_prob, bsize):
+
+        n_caps = 4
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+
+        with tf.variable_scope('Conv1_layer'):
+            # Conv1, [batch_size, 20, 20, 256]
+            conv1 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=50, strides=1)
+
+        # Primary Capsules layer, return [batch_size, ? , 8, 1]
+        with tf.variable_scope('PrimaryCaps_layer'):
+            capsules = tf.layers.conv1d(conv1, filters=32 * 8,
+                                        kernel_size=9,
+                                        strides=2,
+                                        activation=tf.nn.relu)
+            capsules = tf.expand_dims(capsules, 3)
+            capsules = tf.reshape(capsules, (bsize, 60 * 32, 8, 1))
+            capsules = self.squash(capsules)
+
+
+        with tf.variable_scope('FCCaps_layer'):
+            # digitCaps = CapsLayer(num_outputs=10, vec_len=16, with_routing=True, layer_type='FC')
+            # caps2 = digitCaps(capsules_squashed)
+
+            input = tf.reshape(capsules, shape=(bsize, 60 * 32, 1, 8, 1))
+
+            with tf.variable_scope('routing'):
+                # b_IJ: [batch_size, num_caps_l, num_caps_l_plus_1, 1, 1],
+                # about the reason of using 'batch_size', see issue #21
+                b_IJ = tf.constant(np.zeros([bsize, input.shape[1].value, 10, 1, 1], dtype=np.float32))
+                capsules = self.routing(input, b_IJ)
+                capsules = tf.squeeze(capsules, axis=1)
+
+            flat_capsules = tf.layers.flatten(capsules)
+
+            logits = tf.contrib.layers.fully_connected(flat_capsules, 6, activation_fn=tf.nn.sigmoid)
+
+            return logits
+
 
 
     def rnn_caps(self,embedding_matrix, x, keep_prob, bsize):
@@ -907,8 +1058,9 @@ class CAPS:
         n_caps = 8
         n_capfilter = 32
         with tf.name_scope("Embedding"):
-            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
-            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            #embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
 
 
         with tf.variable_scope('Gru_layer'):
