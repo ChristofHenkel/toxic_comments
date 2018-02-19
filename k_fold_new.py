@@ -12,13 +12,15 @@ from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, LIST_CLASSES, LIS
 
 LEVEL = 'word'
 MODE = 'test'
+bagging_method = 'gmean'
+
 TRAIN_DATA_FN = "assets/raw_data/bagging_train.csv"
-#TEST_DATA_FN = "assets/raw_data/test.csv"
-TEST_DATA_FN = 'assets/raw_data/bagging_valid.csv'
+TEST_DATA_FN = "assets/raw_data/test.csv"
+#TEST_DATA_FN = 'assets/raw_data/bagging_valid.csv'
 
 bsize = 512
-type_ = 'models/RNN/'
-model = 'pavel_attention_slim2/'
+type_ = 'models/CAPS/'
+model = 'caps_first_test/'
 
 logs = type_ + model + 'logs/'
 fn_words_dict = type_ + model + 'tc_words_dict.p'
@@ -37,8 +39,8 @@ epochs = [fn.split('.ckpt')[0] for fn in os.listdir(logs) if fn.endswith('.meta'
 results = pd.read_csv(type_ + model + 'results.csv')
 
 def _get_score():
-    rocs = np.zeros(10)
-    loglosses = np.zeros(10)
+    rocs = np.zeros(len(epochs))
+    loglosses = np.zeros(len(epochs))
     for k,epoch in enumerate(epochs):
         row = results.loc[results['fold_id'] == float(epoch.split('_')[0][1:])]
         row = row.loc[row['epoch'] == float(epoch.split('_')[1][1:])]
@@ -61,6 +63,7 @@ def transform_data(data):
     if do_preprocess:
         data = preprocess(data)
     sentences = data["comment_text"].fillna("_NAN_").values
+    # update word dict
     tokenized_sentences, _ = tc.tokenize_sentences(sentences, words_dict)
     coverage(tokenized_sentences,embedding_word_dict)
     sequences = tc.tokenized_sentences2seq(tokenized_sentences, words_dict)
@@ -91,7 +94,9 @@ def predict(epoch, X):
 
     # load meta graph and restore weights
     saver = tf.train.import_meta_graph(logs + epoch + '.ckpt.meta')
+    #saver = tf.train.import_meta_graph(logs + 'k0_e3' + '.ckpt.meta')
     saver.restore(sess,logs + epoch + '.ckpt')
+    #saver.restore(sess, logs + 'k0_e3' + '.ckpt')
 
     results = []
     #[print(n.name) for n in tf.get_default_graph().as_graph_def().node]
@@ -172,11 +177,19 @@ def fold_submissions():
                 predictions = orig_submission[LIST_CLASSES]
         test_predicts_list.append(predictions)
 
-    test_predicts = np.ones(test_predicts_list[0].shape)
-    for fold_predict in test_predicts_list:
-        test_predicts *= fold_predict
 
-    test_predicts **= (1. / len(test_predicts_list))
+    if bagging_method == 'gmean':
+        test_predicts = np.ones(test_predicts_list[0].shape)
+        for fold_predict in test_predicts_list:
+            test_predicts *= fold_predict
+
+        test_predicts **= (1. / len(test_predicts_list))
+    else:
+        test_predicts = np.zeros(test_predicts_list[0].shape)
+        for fold_predict in test_predicts_list:
+            test_predicts += fold_predict
+
+        test_predicts /= len(test_predicts_list)
 
     if MODE == 'train':
         new_submission = orig_submission.copy()
@@ -192,7 +205,7 @@ def fold_submissions():
 
             new_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
             new_submission[LIST_CLASSES] = test_predicts
-            new_submission.to_csv(type_ + model + "folded.csv", index=False)
+            new_submission.to_csv(type_ + model + "test_data_folded_by_mean2.csv", index=False)
 
 
 for epoch in epochs:

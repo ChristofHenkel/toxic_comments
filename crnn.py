@@ -49,7 +49,6 @@ with graph.as_default():
     x = tf.placeholder(dtype=tf.int32,shape=(None,maxlen),name='x')
     y = tf.placeholder(dtype=tf.float32,shape=(None,6),name='y')
     keep_prob = tf.placeholder(dtype=tf.float32,name='keep_prob')
-    is_training = tf.placeholder(tf.bool, [], name='is_training')
 
     embedding = tf.get_variable("embedding", [preprocessor.char_vocab_size, 200], dtype=tf.float32)
     embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
@@ -122,7 +121,7 @@ def train():
                 cost_ , _, roc_auc_train = sess.run([cost,optimizer,auc_update_op],feed_dict={x:batch_x,
                                                                  y:batch_y,
                                                                  keep_prob:0.7,
-                                                                 is_training:True})
+                                                                 })
 
                 print('e%s -- s%s -- cost: %s' %(epoch,step,cost_))
 
@@ -134,8 +133,8 @@ def train():
             while vstep * bsize < valid_iters:
                 test_cost_, roc_auc_test = sess.run([cost,auc_update_op], feed_dict={x: X_valid[vstep * bsize:(vstep + 1) * bsize],
                                                        y: Y_valid[vstep * bsize:(vstep + 1) * bsize],
-                                                       keep_prob: 1,
-                                                       is_training: False
+                                                       keep_prob: 1
+
                                                        })
 
                 vcosts.append(test_cost_)

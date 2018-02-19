@@ -12,17 +12,14 @@ import os
 import time
 from preprocess_utils import Preprocessor, preprocess
 from augmentation import retranslation, mixup, synonyms
-from architectures import CNN, CAPS, BIRNN
+from architectures import CNN, CAPS, BIRNN, CRNN
 import pickle
 from utilities import loadGloveModel, coverage
 from sklearn.model_selection import train_test_split
+from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, COMMENT, LIST_CLASSES
 
-model_baseline = BIRNN().pavel_all_outs
-unknown_word = "_UNK_"
-end_word = "_END_"
-nan_word = "_NAN_"
-COMMENT = "comment_text"
-list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
+model_baseline = CAPS().cudnnrnn_caps
+
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
 
 train_data = pd.read_csv("assets/raw_data/bagging_train.csv")
@@ -37,25 +34,26 @@ test_data = pd.read_csv("assets/raw_data/bagging_valid.csv")
 class Config:
 
     do_preprocess = True
-    max_sentence_len = 500
     do_augmentation_with_translate = False
     do_augmentation_with_mixup = False
     do_synthezize_embeddings = False
     mode_embeddings = 'fasttext_300d'
     if do_synthezize_embeddings:
         synth_threshold = 0.7
-    bsize = 512
+    char_embedding_size = 500
+    bsize = 256
     max_seq_len = 500
-    epochs = 10
-    model_name = 'pavel_all_outs_slim'
+    epochs = 15
+    model_name = 'cudrnn_caps_slim'
     root = ''
-    fp = 'models/RNN/' + model_name + '/'
+    fp = 'models/CAPS/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
     max_models_to_keep = 1
     save_by_roc = False
 
+    level = 'word'
     lr = 0.001
     keep_prob = 0.7
 
@@ -99,12 +97,12 @@ class ToxicComments:
                 try:
                     seq.append(words_dict[token])
                 except KeyError:
-                    seq.append(words_dict[unknown_word])
+                    seq.append(words_dict[UNKNOWN_WORD])
             sequences.append(seq)
         return sequences
 
     def update_words_dict(self,tokenized_sentences):
-        self.words_dict.pop(unknown_word, None)
+        self.words_dict.pop(UNKNOWN_WORD, None)
         k = 0
         for sentence in tokenized_sentences:
             for token in sentence:
@@ -112,7 +110,7 @@ class ToxicComments:
                     k += 1
                     self.words_dict[token] = len(self.words_dict)
         print('{} words added'.format(k))
-        self.words_dict[unknown_word] = len(self.words_dict)
+        self.words_dict[UNKNOWN_WORD] = len(self.words_dict)
         self.id2word = dict((id, word) for word, id in self.words_dict.items())
 
     def clear_embedding_list(self,model, embedding_word_dict, words_dict):
@@ -182,14 +180,17 @@ class ToxicComments:
         for sentence in tqdm.tqdm(tokenized_sentences):
             current_words = []
             for word_index in sentence:
-                word = self.id2word[word_index]
-                word_id = embedding_word_dict.get(word, len(embedding_word_dict) - 2)
+                try:
+                    word = self.id2word[word_index]
+                    word_id = embedding_word_dict.get(word, len(embedding_word_dict) - 2)
+                except KeyError:
+                    word_id = embedding_word_dict.get(UNKNOWN_WORD, len(embedding_word_dict) - 2)
                 current_words.append(word_id)
 
-            if len(current_words) >= self.cfg.max_sentence_len:
-                current_words = current_words[:self.cfg.max_sentence_len]
+            if len(current_words) >= self.cfg.max_seq_len:
+                current_words = current_words[:self.cfg.max_seq_len]
             else:
-                current_words += [len(embedding_word_dict) - 1] * (self.cfg.max_sentence_len - len(current_words))
+                current_words += [len(embedding_word_dict) - 1] * (self.cfg.max_seq_len - len(current_words))
             words_train.append(current_words)
         return words_train
 
@@ -223,9 +224,9 @@ class ToxicComments:
 
         del model
 
-        embedding_word_dict[unknown_word] = len(embedding_word_dict)
+        embedding_word_dict[UNKNOWN_WORD] = len(embedding_word_dict)
         embedding_list.append([0.] * embedding_size)
-        embedding_word_dict[end_word] = len(embedding_word_dict)
+        embedding_word_dict[END_WORD] = len(embedding_word_dict)
         embedding_list.append([-1.] * embedding_size)
 
         embedding_matrix = np.array(embedding_list)
@@ -241,7 +242,7 @@ class ToxicComments:
             tokenized_sentences, self.words_dict = self.tokenize_sentences(sentences, self.words_dict)
             list_of_tokenized_sentences.append(tokenized_sentences)
 
-        self.words_dict[unknown_word] = len(self.words_dict)
+        self.words_dict[UNKNOWN_WORD] = len(self.words_dict)
         self.id2word = dict((id, word) for word, id in self.words_dict.items())
 
         return list_of_tokenized_sentences
@@ -280,7 +281,7 @@ class Model:
             self.em = tf.placeholder(tf.float32, shape=(embedding_matrix.shape[0], embedding_matrix.shape[1]), name="em")
             self.keep_prob = tf.placeholder(dtype=tf.float32, name="keep_prob")
 
-            self.output = model_baseline(self.em,self.x,self.keep_prob)
+            self.output = model_baseline(self.em,self.x,self.keep_prob,self.cfg.bsize) #self.cfg.bsize
 
 
             with tf.variable_scope('logits'):
@@ -392,7 +393,7 @@ class Model:
 
             res[s * self.cfg.bsize:(s + 1) * self.cfg.bsize] = logits_
 
-        sample_submission[list_classes] = res
+        sample_submission[LIST_CLASSES] = res
 
         dir_name = self.cfg.model_name
         if not os.path.exists('submissions/' + dir_name):
@@ -418,28 +419,36 @@ def train_folds(fold_count=10):
 
     sentences_train = train_data["comment_text"].fillna("_NAN_").values
     sentences_test = test_data["comment_text"].fillna("_NAN_").values
-    Y = train_data[list_classes].values
+    Y = train_data[LIST_CLASSES].values
 
-    tokenized_sentences_train, tokenized_sentences_test = tc.fit_tokenizer([sentences_train,sentences_test])
+    if tc.cfg.level == 'word':
+        tokenized_sentences_train, tokenized_sentences_test = tc.fit_tokenizer([sentences_train,sentences_test])
 
 
-    with open(tc.cfg.fp + 'tc_words_dict.p','wb') as f:
-        pickle.dump(tc.words_dict,f)
+        with open(tc.cfg.fp + 'tc_words_dict.p','wb') as f:
+            pickle.dump(tc.words_dict,f)
 
-    sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
-    #sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
-    embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
-    coverage(tokenized_sentences_train,embedding_word_dict)
-    with open(tc.cfg.fp + 'embedding_word_dict.p','wb') as f:
-        pickle.dump(embedding_word_dict,f)
-    np.save(tc.cfg.fp + 'embedding.npy',embedding_matrix)
-    train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train, embedding_word_dict)
-    #test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
+        sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
+        #sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
+        embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
+        coverage(tokenized_sentences_train,embedding_word_dict)
+        with open(tc.cfg.fp + 'embedding_word_dict.p','wb') as f:
+            pickle.dump(embedding_word_dict,f)
+        np.save(tc.cfg.fp + 'embedding.npy',embedding_matrix)
+        train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train, embedding_word_dict)
+        #test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
 
-    X = np.array(train_list_of_token_ids)
-    #X_test = np.array(test_list_of_token_ids)
-    X_test = None
+        X = np.array(train_list_of_token_ids)
+        #X_test = np.array(test_list_of_token_ids)
+        X_test = None
+    else:
+        tc.preprocessor.min_count_chars = 10
 
+        tc.preprocessor.create_char_vocabulary(sentences_train)
+        X = tc.preprocessor.char2seq(sentences_train, maxlen=tc.cfg.max_seq_len)
+        embedding_matrix = np.zeros((tc.preprocessor.char_vocab_size, tc.cfg.char_embedding_size))
+
+        X_test = None
     fold_size = len(X) // 10
     for fold_id in range(0, fold_count):
         fold_start = fold_size * fold_id
@@ -506,7 +515,7 @@ def predict(sentences_test=None, X_test=None, do_submission = False):
 
     if do_submission:
         sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
-        sample_submission[list_classes] = results
+        sample_submission[LIST_CLASSES] = results
         if not os.path.exists(type_ + model + 'submissions/'):
             os.mkdir(type_ + model + 'submissions/')
 

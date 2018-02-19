@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from tensorflow.contrib.keras.api.keras.losses import binary_crossentropy
+from keras.layers import CuDNNGRU, Dropout, Bidirectional
 import tensorflow as tf
 from collections import Counter
 from utilities import get_oov_vector
@@ -15,15 +16,12 @@ from augmentation import retranslation, mixup, synonyms
 from architectures import CNN, CAPS
 import pickle
 from utilities import loadGloveModel, coverage
+from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD
 
-
-unknown_word = "_UNK_"
-end_word = "_END_"
-nan_word = "_NAN_"
-list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
+LIST_CLASSES = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
 
-train_data = pd.read_csv("assets/raw_data/train.csv")
+train_data = pd.read_csv("assets/raw_data/bagging_train.csv")
 test_data = pd.read_csv("assets/raw_data/test.csv")
 
 sentences_train = train_data["comment_text"].fillna("_NAN_").values
@@ -43,7 +41,7 @@ class Config:
     epochs = 20
     model_name = 'caps_4'
     root = ''
-    fp = 'models/CAPS/' + model_name + '/'
+    fp = 'models/DEBUGS/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
@@ -93,12 +91,12 @@ class ToxicComments:
                 try:
                     seq.append(words_dict[token])
                 except KeyError:
-                    seq.append(words_dict[unknown_word])
+                    seq.append(words_dict[UNKNOWN_WORD])
             sequences.append(seq)
         return sequences
 
     def update_words_dict(self,tokenized_sentences):
-        self.words_dict.pop(unknown_word, None)
+        self.words_dict.pop(UNKNOWN_WORD, None)
         k = 0
         for sentence in tokenized_sentences:
             for token in sentence:
@@ -106,7 +104,7 @@ class ToxicComments:
                     k += 1
                     self.words_dict[token] = len(self.words_dict)
         print('{} words added'.format(k))
-        self.words_dict[unknown_word] = len(self.words_dict)
+        self.words_dict[UNKNOWN_WORD] = len(self.words_dict)
         self.id2word = dict((id, word) for word, id in self.words_dict.items())
 
     def clear_embedding_list(self,model, embedding_word_dict, words_dict):
@@ -217,9 +215,9 @@ class ToxicComments:
 
         del model
 
-        embedding_word_dict[unknown_word] = len(embedding_word_dict)
+        embedding_word_dict[UNKNOWN_WORD] = len(embedding_word_dict)
         embedding_list.append([0.] * embedding_size)
-        embedding_word_dict[end_word] = len(embedding_word_dict)
+        embedding_word_dict[END_WORD] = len(embedding_word_dict)
         embedding_list.append([-1.] * embedding_size)
 
         embedding_matrix = np.array(embedding_list)
@@ -235,7 +233,7 @@ class ToxicComments:
             tokenized_sentences, self.words_dict = self.tokenize_sentences(sentences, self.words_dict)
             list_of_tokenized_sentences.append(tokenized_sentences)
 
-        self.words_dict[unknown_word] = len(self.words_dict)
+        self.words_dict[UNKNOWN_WORD] = len(self.words_dict)
         self.id2word = dict((id, word) for word, id in self.words_dict.items())
 
         return list_of_tokenized_sentences
@@ -247,7 +245,7 @@ class ToxicComments:
 
 tc = ToxicComments(Config)
 
-Y = train_data[list_classes].values
+Y = train_data[LIST_CLASSES].values
 
 tokenized_sentences_train, tokenized_sentences_test = tc.fit_tokenizer([sentences_train,sentences_test])
 
@@ -286,7 +284,7 @@ Y_train = np.concatenate([Y[:fold_start], Y[fold_end:]])
 
     #X_train, Y_train = mixup( X_train, Y_train,2, 0.1, seed=43)
 
-def parametric_relu(_x):
+def prelu(_x):
     alphas = tf.get_variable('alpha', _x.get_shape()[-1],
                              initializer=tf.constant_initializer(0.0),
                              dtype=tf.float32)
@@ -399,44 +397,47 @@ with graph.as_default():
     em = tf.placeholder(tf.float32, shape=(embedding_matrix.shape[0], embedding_matrix.shape[1]), name="em")
     keep_prob = tf.placeholder(dtype=tf.float32, name="keep_prob")
 
-    n_caps1 = 6
+    n_caps = 6
+    n_capfilter = 32
     with tf.name_scope("Embedding"):
         # embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
         embedded_input = tf.nn.embedding_lookup(em, x, name="embedded_input")
 
-        with tf.variable_scope('Conv1_layer'):
-            # Conv1, [batch_size, 20, 20, 256]
-            conv1 = tf.layers.conv1d(embedded_input, filters=16, kernel_size=1, strides=1)
-            conv3 = tf.layers.conv1d(embedded_input, filters=16, kernel_size=3, strides=1)
-            conv5 = tf.layers.conv1d(embedded_input, filters=16, kernel_size=5, strides=1)
-            conv = tf.concat([conv1,conv3,conv5], axis= 1)
+    conv1 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=1, strides=2)
+    conv3 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=3, strides=2)
+    conv5 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=5, strides=2)
+    conv = tf.concat([conv1, conv3, conv5], axis=1)
+    conv = tf.transpose(conv,[0,2,1])
 
 
-        # Primary Capsules layer, return [batch_size, ? , 8, 1]
-        with tf.variable_scope('PrimaryCaps_layer'):
-            capsules = tf.layers.conv1d(conv, filters=16 * n_caps1,
-                                        kernel_size=3,
-                                        strides=2,
-                                        activation=tf.nn.relu)
-            capsules = tf.expand_dims(capsules, 3)
-            capsules = tf.reshape(capsules, (bsize, 746 * 16, n_caps1, 1))
-            capsules = squash(capsules)
+    with tf.variable_scope('PrimaryCaps_layer'):
+        capsules = tf.layers.conv1d(conv, filters=n_capfilter * n_caps,
+                                    kernel_size=9,
+                                    strides=2,
+                                    activation=tf.nn.relu)
+        capsules = tf.expand_dims(capsules, 3)
+        capsules = tf.reshape(capsules, (bsize, 60 * n_capfilter, n_caps, 1))
+        capsules = squash(capsules)
 
-        input = tf.reshape(capsules, shape=(bsize, -1, 1, n_caps1, 1))
+    with tf.variable_scope('FCCaps_layer'):
+        # digitCaps = CapsLayer(num_outputs=10, vec_len=16, with_routing=True, layer_type='FC')
+        # caps2 = digitCaps(capsules_squashed)
 
-        with tf.variable_scope('routing'):
-            # b_IJ: [batch_size, num_caps_l, num_caps_l_plus_1, 1, 1],
-            # about the reason of using 'batch_size', see issue #21
-            b_IJ = tf.constant(np.zeros([bsize, input.shape[1].value, 6, 1, 1], dtype=np.float32))
-            capsules = routing(input, b_IJ, num_caps_out=6, caps_dim_out=8)
-            capsules = tf.squeeze(capsules, axis=1)
+        input = tf.reshape(capsules, shape=(bsize, 60 * 32, 1, n_caps, 1))
 
-        cap_norms = tf.norm(capsules, axis=2)[:,:,0]
-        #cap_norms = tf.minimum(tf.maximum(cap_norms,0),1)
+    with tf.variable_scope('routing'):
+        # b_IJ: [batch_size, num_caps_l, num_caps_l_plus_1, 1, 1],
+        # about the reason of using 'batch_size', see issue #21
+        b_IJ = tf.constant(np.zeros([bsize, input.shape[1].value, 6, 1, 1], dtype=np.float32))
+        capsules = routing(input, b_IJ, num_caps_out=6, caps_dim_out=8)
+        capsules = tf.squeeze(capsules, axis=1)
 
-        #flat_capsules = tf.layers.flatten(capsules)
+    #cap_norms = tf.norm(capsules, axis=2)[:,:,0]
+    #cap_norms = tf.minimum(tf.maximum(cap_norms,0),1)
 
-        logits = tf.contrib.layers.fully_connected(cap_norms, 6, activation_fn=tf.nn.sigmoid)
+    flat_capsules = tf.layers.flatten(capsules)
+
+    logits = tf.contrib.layers.fully_connected(flat_capsules, 6, activation_fn=tf.nn.sigmoid)
 
     """
     caps_len = 8

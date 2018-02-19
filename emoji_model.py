@@ -4,6 +4,7 @@ from tensorflow.contrib import layers
 import numpy as np
 from tqdm import tqdm
 from tensorflow.contrib.keras.api.keras.losses import binary_crossentropy
+from global_variables import TRAIN_FILENAME
 
 label_cols = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
 batch_size = 512
@@ -13,14 +14,16 @@ batch_size = 512
 
 
 
-
-train = pd.read_csv('assets/raw_data/train_extended2304.csv')
+train = pd.read_csv(TRAIN_FILENAME)
+features = pd.read_csv('assets/raw_data/train_emoji_features.csv')
 
 Y = train[label_cols].values
 
-X = train['features'].values
-X = [np.fromstring(a[1:-2],sep = ',') for a in tqdm(X)]
-X = np.array(X)
+#X = train['features'].values
+#X = [np.fromstring(a[1:-2],sep = ',') for a in tqdm(X)]
+#X = np.array(X)
+X = features.values
+X = X[:,1:]
 
 split_at = len(X) // 10
 
@@ -34,14 +37,15 @@ with graph.as_default():
     y = tf.placeholder(shape=(None, 6), name='y', dtype=tf.float32)
     keep_prob = tf.placeholder(dtype=tf.float32)
 
-    with tf.variable_scope('hidden'):
-        h1 = layers.fully_connected(x, 16, activation_fn=tf.nn.elu)
-        h1 = tf.nn.dropout(h1, keep_prob=keep_prob)
 
-    logits = layers.fully_connected(h1, 6, activation_fn=tf.nn.sigmoid)
+    #with tf.variable_scope('hidden'):
+    #    h1 = layers.fully_connected(x, 16, activation_fn=tf.nn.elu)
+    #    h1 = tf.nn.dropout(h1, keep_prob=keep_prob)
+
+    logits = layers.fully_connected(x, 6, activation_fn=tf.nn.sigmoid)
     # loss = tf.losses.sigmoid_cross_entropy(multi_class_labels=y,logits=logits)
     loss = binary_crossentropy(y, logits)
-    optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001).minimize(loss)
+    optimizer = tf.train.RMSPropOptimizer(learning_rate=0.01).minimize(loss)
 
     (_, roc_auc_op) = tf.metrics.auc(labels=y, predictions=logits)
 

@@ -14,17 +14,19 @@ from preprocess_utils import Preprocessor
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.multiclass import OneVsRestClassifier
 import num2words
+from global_variables import TEST_FILENAME
 
 tokenizer = TweetTokenizer()
 
 PREPROCESS = True
 FN_OUT_TRAIN = 'models/NBSVM/slim/nbsvm_prediction_train.csv'
-FN_OUT_TEST = 'models/NBSVM/slim/nbsvm_prediction_valid.csv'
-MODE = 'train'
+FN_OUT_TEST = 'models/NBSVM/slim/nbsvm_prediction_test.csv'
+MODE = 'test'
 COMMENT = 'comment_text'
 
 train = pd.read_csv('assets/raw_data/bagging_train.csv')
-test = pd.read_csv('assets/raw_data/bagging_valid.csv')
+#test = pd.read_csv('assets/raw_data/bagging_valid.csv')
+test = pd.read_csv(TEST_FILENAME)
 subm = pd.read_csv('assets/raw_data/sample_submission.csv')
 
 label_cols = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
@@ -142,7 +144,7 @@ elif MODE == 'test':
     except KeyError:
         submid = pd.DataFrame({'id': subm["id"]})
         submission = pd.concat([submid, pd.DataFrame(preds, columns=label_cols)], axis=1)
-        submission.to_csv('models/NBSVM/nbsvm_submission.csv', index=False)
+        submission.to_csv(FN_OUT_TEST, index=False)
 
 else:
     submission = train_chars.copy()

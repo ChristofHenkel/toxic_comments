@@ -11,12 +11,15 @@ input_fp = fp + 'input/'
 new_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
 csv_files = os.listdir(input_fp)
 
-
+csv_files = ['models/CNN/inception2_slim/test_data_folded.csv',
+             'models/NBSVM/slim/nbsvm_submission.csv',
+             'models/RNN/pavel_attention_slim2/test_data_folded.csv',
+             'models/RNN/pavel_all_outs_slim/test_data_folded.csv']
 
 
 test_predicts_list = []
 for csv_file in csv_files:
-    orig_submission = pd.read_csv(input_fp + csv_file)
+    orig_submission = pd.read_csv(csv_file)
     predictions = orig_submission[list_classes]
     test_predicts_list.append(predictions)
 
@@ -55,6 +58,10 @@ def bag_by_rank_mean(test_predicts_list):
         bagged_predicts[:,i] = interp(bagged_ranks[:,i])
     return bagged_predicts
 
+
+submission = new_submission.copy()
+submission[list_classes] = bag_by_average(test_predicts_list)
+submission.to_csv("bag_by_mean.csv", index=False)
 
 submission = new_submission.copy()
 submission[list_classes] = bag_by_rank_mean(test_predicts_list)
