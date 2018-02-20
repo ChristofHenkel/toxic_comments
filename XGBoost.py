@@ -6,10 +6,10 @@ from sklearn.metrics import log_loss, roc_auc_score, mean_squared_error
 from utilities import corr_matrix
 import numpy as np
 
-csvs_train = ['models/CNN/inception2_slim/inception2_slim_baggin_logits_folded.csv',
+csvs_train = ['models/CNN/inception2_slim/l2_train_data.csv',
               #'models/NBSVM/slim/nbsvm_prediction_valid.csv',
               #'models/RNN/pavel_attention_slim2/baggin_logits_folded.csv',
-              'models/RNN/pavel_all_outs_slim/birnn_all_outs_slim_baggin_logits_folded.csv'
+              'models/RNN/pavel_all_outs_slim/l2_train_data.csv'
               ]
 
 
@@ -97,7 +97,7 @@ for i in range(6):
 
 
 
-print(mean_squared_error(y_true=Y_valid[:,i],y_pred=a))
+
 
 
 
