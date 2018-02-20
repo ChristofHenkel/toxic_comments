@@ -8,7 +8,7 @@ import pickle
 import numpy as np
 import tensorflow as tf
 from train_model import ToxicComments
-import tqdm
+from tqdm import tqdm
 import pandas as pd
 import os
 from utilities import coverage

@@ -12,6 +12,7 @@ import logging
 from utilities import load_bad_words
 import tqdm
 from num2words import num2words
+from global_variables import COMMENT
 
 logging.basicConfig(level=logging.INFO)
 
@@ -525,7 +526,19 @@ class Preprocessor:
 
 
 
+def preprocess(data):
 
+    print('preprocessing')
+    p = Preprocessor()
+    data[COMMENT] = data[COMMENT].map(lambda x: p.lower(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_breaks(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.expand_contractions(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_ip(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_links_text(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.replace_numbers(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_bigrams(x))
+    #data[COMMENT] = data[COMMENT].str.replace(r"[^A-Za-z0-9(),!?@\'\`\"\_\n]", " ")
+    return data
 
 
 
