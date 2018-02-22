@@ -3,6 +3,7 @@ from tensorflow.contrib import layers
 import numpy as np
 from keras.layers import CuDNNGRU, Dropout, Bidirectional, BatchNormalization
 
+
 class CNN:
 
     @staticmethod
@@ -433,6 +434,7 @@ class CCNN:
 
         return logits
 
+
 class CRNN:
 
     @staticmethod
@@ -485,6 +487,30 @@ class CRNN:
         #x2 = Dropout(1-keep_prob)(x2)
 
         outputs = Bidirectional(CuDNNGRU(64, return_sequences=True))(x2)
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last], axis=1)
+
+        #with tf.variable_scope('fc'):
+        #    prelogits = layers.fully_connected(outputs, 32, activation_fn=tf.nn.elu)
+
+        logits = tf.contrib.layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
+    def cudnn_cnn_rnn(embedding_matrix,x,keep_prob):
+        embedding = tf.get_variable("embedding", [embedding_matrix.get_shape()[0],embedding_matrix.get_shape()[1]], dtype=tf.float32)
+        embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+
+        x2 = tf.layers.conv1d(embedded_input, filters=256, kernel_size=3, strides=1)
+        x2 = tf.layers.conv1d(x2, filters=256, kernel_size=3, strides=1)
+        x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(x2)
+        x2 = tf.transpose(x2, [0, 2, 1])
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = BatchNormalization()(x2)
 
         maxs = tf.reduce_max(outputs, axis=2)
         means = tf.reduce_mean(outputs, axis=2)
@@ -654,6 +680,29 @@ class BIRNN:
         x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(embedded_input)
         x2 = tf.transpose(x2, [0, 2, 1])
         x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = BatchNormalization()(x2)
+
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last], axis=1)
+
+        #x3 = layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
+    def pavel_all_outs_BNb(embedding_matrix, x, keep_prob):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(embedded_input)
+        x2 = tf.transpose(x2, [0, 2, 1])
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(x2)
         outputs = BatchNormalization()(x2)
 
 

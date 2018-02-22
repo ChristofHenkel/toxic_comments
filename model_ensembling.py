@@ -17,12 +17,13 @@ from sklearn.model_selection import KFold
 import xgboost as xgb
 from xgboost import XGBRegressor
 import scipy
-from utilities import corr_matrix
+from utilities import corr_matrix, logloss
 from global_variables import LIST_LOGITS, LIST_CLASSES
 
 classification_method = 'catboost' #nn, catboost
-do_prediction = False
+do_prediction = True
 fn_out = 'models/ENSAMBLES/e2/'
+# Todo add switch for per class or all logits
 
 #csvs_train = ['models/CNN/inception2_slim/inception2_slim_baggin_logits_folded.csv',
 #              'models/NBSVM/slim/nbsvm_prediction_valid.csv',
@@ -31,20 +32,20 @@ fn_out = 'models/ENSAMBLES/e2/'
 #              ]
 
 csvs_train = ['models/CNN/inception2_slim/l2_train_data.csv',
-              #'models/NBSVM/slim/nbsvm_prediction_valid.csv',
+              'models/NBSVM/slim/l2_train_data.csv',
               #'models/RNN/pavel_attention_slim2/baggin_logits_folded.csv',
               'models/RNN/pavel_all_outs_slim/l2_train_data.csv'
               ]
-csvs_test = ['models/CNN/inception2_slim/inception2_slim_baggin_logits_folded.csv',
-              #'models/NBSVM/slim/nbsvm_prediction_valid.csv',
+csvs_valid = ['models/CNN/inception2_slim/inception2_slim_baggin_logits_folded.csv',
+              'models/NBSVM/slim/nbsvm_prediction_valid.csv',
               #'models/RNN/pavel_attention_slim2/baggin_logits_folded.csv',
               'models/RNN/pavel_all_outs_slim/birnn_all_outs_slim_baggin_logits_folded.csv'
               ]
 
-#csvs_test = ['models/CNN/inception2_slim/inception2_slim.csv',
-#             #'models/NBSVM/slim/nbsvm_submission.csv',
-#             #'models/RNN/pavel_attention_slim2/test_data_folded.csv',
-#             'models/RNN/pavel_all_outs_slim/birnn_all_outs.csv']
+csvs_test = ['models/CNN/inception2_slim/inception2_slim.csv',
+             'models/NBSVM/slim/nbsvm_submission.csv',
+             #'models/RNN/pavel_attention_slim2/test_data_folded.csv',
+             'models/RNN/pavel_all_outs_slim/birnn_all_outs.csv']
 
 dfs = [pd.read_csv(csv) for csv in csvs_train]
 xs = [df[LIST_LOGITS].values for df in dfs]
@@ -58,12 +59,7 @@ print(' ')
 for df in dfs:
     print(roc_auc_score(y_true=df[LIST_CLASSES].values, y_score=df[LIST_LOGITS].values))
 
-def lloss(y_true,y_pred):
-    l = 0
-    for i in range(6):
-        l += log_loss(y_true=y_true[:,i],y_pred=y_pred[:,i])
-    l /= 6
-    return l
+
 
 ys = [df[LIST_CLASSES].values for df in dfs]
 
@@ -71,14 +67,7 @@ for i,_ in enumerate(csvs_train[1:]):
     assert np.array_equal(ys[0],ys[i])
 
 
-Y = ys[0]
-X = np.hstack(xs)
 
-
-if classification_method == 'catboost':
-    X = np.concatenate([xs])
-    X = X.transpose([1, 0, 2])
-split_at = len(X)//10
 
 #kf = KFold(n_splits=10)
 #for train, valid in kf.split(X):
@@ -88,7 +77,10 @@ split_at = len(X)//10
 #    Y_valid = Y[valid]
 
 dfs_test = [pd.read_csv(csv) for csv in csvs_test]
-xs_test = [df[LIST_LOGITS].values for df in dfs_test]
+xs_test = [df[LIST_CLASSES].values for df in dfs_test]
+
+dfs_valid = [pd.read_csv(csv) for csv in csvs_valid]
+xs_valid = [df[LIST_LOGITS].values for df in dfs_valid]
 #n_models = len(csvs_test)
 
 print('Corr matrix')
@@ -96,16 +88,26 @@ print(corr_matrix(xs_test))
 print(' ')
 
 X_valid = np.hstack(xs_test)
+
+Y = ys[0]
+X = np.hstack(xs)
+
+
 if classification_method == 'catboost':
-    X_valid = np.concatenate([xs_test])
+    X = np.concatenate([xs])
+    X = X.transpose([1, 0, 2])
+    X_test = np.concatenate([xs_test])
+    X_test = X_test.transpose([1, 0, 2])
+    X_valid = np.concatenate([xs_valid])
     X_valid = X_valid.transpose([1, 0, 2])
-ys_test = [df[LIST_CLASSES].values for df in dfs_test]
+
+ys_valid = [df[LIST_CLASSES].values for df in dfs_valid]
 
 for i,_ in enumerate(csvs_test[1:]):
-    assert np.array_equal(ys_test[0],ys_test[i])
+    assert np.array_equal(ys_valid[0],ys_valid[i])
 
 
-Y_valid = ys_test[0]
+Y_valid = ys_valid[0]
 X_train = X
 Y_train = Y
 #X_train = X[split_at:]
@@ -116,6 +118,9 @@ Y_train = Y
 #w = np.zeros((4, 6))
 preds_cat = np.zeros((len(X_valid), 6))
 preds_xgb = np.zeros((len(X_valid), 6))
+preds_logistic = np.zeros((len(X_valid), 6))
+
+
 #for i in range(6):
 #    clf = RandomForestRegressor(n_estimators=1000, verbose=True,n_jobs=10,warm_start=True)
 #    clf.fit(X_train[:,:,i],Y_train[:,i])
@@ -128,47 +133,77 @@ preds_xgb = np.zeros((len(X_valid), 6))
 
 if classification_method == 'catboost':
     if do_prediction:
-        dfs_test = [pd.read_csv(csv) for csv in csvs_test]
-        xs_test = [df[LIST_LOGITS].values for df in dfs_test]
-        n_models = len(csvs_test)
 
-        print('Corr matrix')
-        print(corr_matrix(xs_test))
-        print(' ')
-
-        X_test = np.hstack(xs_test)
         res = np.zeros((len(X_test),6))
+        preds_xgb_test = np.zeros((len(X_test), 6))
+        preds_logistic_test = np.zeros((len(X_test), 6))
 
     for i in range(6):
-        model = CatBoostClassifier(iterations=500,learning_rate=0.02, depth=2, loss_function='Logloss',task_type = 'CPU',logging_level='Info')
+        #model = CatBoostClassifier(iterations=500,learning_rate=0.02, depth=2, loss_function='Logloss',task_type = 'CPU',logging_level='Info')
         clf = XGBRegressor(objective='reg:logistic', max_depth=2, n_estimators=100, learning_rate=0.1, subsample=0.8,
                            min_child_weight=3)
-        fit_model = model.fit(X_train[:,:,i], Y_train[:,i])
+        clf2 = LogisticRegression()
+        #fit_model = model.fit(X_train[:,:,i], Y_train[:,i])
         clf.fit(X_train[:,:,i], Y_train[:, i])
-        preds_cat[:, i] = fit_model.predict_proba(X_valid[:,:,i])[:, 1]
+        clf2.fit(X_train[:, :, i], Y_train[:, i])
+        #preds_cat[:, i] = fit_model.predict_proba(X_valid[:,:,i])[:, 1]
         preds_xgb[:, i] = clf.predict(X_valid[:,:,i])
+        preds_logistic[:, i] = clf2.predict_proba(X_valid[:, :, i])[:, 1]
         if do_prediction:
-            res[:, i] = fit_model.predict_proba(X_test)[:, 1]
-            print('using catboost %s' % lloss(Y_valid, preds_cat))
-            sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
-            sample_submission[LIST_CLASSES] = res
-            if not os.path.exists(fn_out):
-                os.mkdir(fn_out)
+            preds_xgb_test[:, i] = clf.predict(X_test[:, :, i])
+            preds_logistic_test[:, i] = clf2.predict_proba(X_test[:, :, i])[:, 1]
+            #res[:, i] = fit_model.predict_proba(X_test)[:, 1]
+            #print('using catboost %s' % lloss(Y_valid, preds_cat))
+    if do_prediction:
+        sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
+        #sample_submission[LIST_CLASSES] = res
+        #sample_submission[LIST_CLASSES] = preds_xgb
+        sample_submission[LIST_CLASSES] = preds_logistic_test
+        if not os.path.exists(fn_out):
+            os.mkdir(fn_out)
 
-            fn = fn_out + 'cat_boost_submission.csv'
-            sample_submission.to_csv(fn, index=False)
+        #fn = fn_out + 'cat_boost_submission.csv'
+        #fn = fn_out + 'xgb_blend_submission.csv'
+        fn = fn_out + 'stacked_logistic_submission.csv'
+        sample_submission.to_csv(fn, index=False)
+
+        sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
+        #sample_submission[LIST_CLASSES] = res
+        #sample_submission[LIST_CLASSES] = preds_xgb
+        sample_submission[LIST_CLASSES] = preds_xgb_test
+        if not os.path.exists(fn_out):
+            os.mkdir(fn_out)
+
+        #fn = fn_out + 'cat_boost_submission.csv'
+        #fn = fn_out + 'xgb_blend_submission.csv'
+        fn = fn_out + 'stacked_xgb_submission.csv'
+        sample_submission.to_csv(fn, index=False)
 
 
+combi = np.mean([preds_logistic_test,preds_xgb_test],axis= 0)
+sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
+# sample_submission[LIST_CLASSES] = res
+# sample_submission[LIST_CLASSES] = preds_xgb
+sample_submission[LIST_CLASSES] = combi
+if not os.path.exists(fn_out):
+    os.mkdir(fn_out)
+
+# fn = fn_out + 'cat_boost_submission.csv'
+# fn = fn_out + 'xgb_blend_submission.csv'
+fn = fn_out + 'stacked_mean_of_xgb_logistic_submission.csv'
+sample_submission.to_csv(fn, index=False)
 #print('using mean %s' %roc_auc_score(Y_valid,np.mean([x[:split_at] for x in xs],axis=0)))
-print('using mean %s' %roc_auc_score(Y_valid,np.mean([x for x in xs_test],axis=0)))
+print('using mean %s' %roc_auc_score(Y_valid,np.mean([x for x in xs_valid],axis=0)))
 print('using catboost %s' %roc_auc_score(Y_valid,preds_cat))
 print('using xgb %s' %roc_auc_score(Y_valid,preds_xgb))
-
+print('using lr %s' %roc_auc_score(Y_valid,preds_logistic))
+print('using lr %s' %roc_auc_score(Y_valid,np.mean([preds_logistic,preds_xgb],axis= 0)))
 #print('using mean %s' %lloss(Y_valid,np.mean([x[:split_at] for x in xs],axis=0)))
-print('using mean %s' %lloss(Y_valid,np.mean([x for x in xs_test],axis=0)))
-print('using catboost %s' %lloss(Y_valid,preds_cat))
-print('using xgb %s' %lloss(Y_valid,preds_xgb))
-
+print('using mean %s' %logloss(Y_valid,np.mean([x for x in xs_valid],axis=0)))
+print('using catboost %s' %logloss(Y_valid,preds_cat))
+print('using xgb %s' %logloss(Y_valid,preds_xgb))
+print('using lr %s' %logloss(Y_valid,preds_logistic))
+print('using lr %s' %logloss(Y_valid,np.mean([preds_logistic,preds_xgb],axis= 0)))
 tf.reset_default_graph()
 graph = tf.Graph()
 
@@ -235,20 +270,7 @@ with tf.Session(graph=graph,config=config) as sess:
 
 
 
-for x in xs:
-    print(lloss(y_true=Y_valid,y_pred=x[:split_at]))
 
-print('------------->')
-print(lloss(y_true=Y_valid,y_pred=logits_val))
-print('using mean %s' %lloss(Y_valid,np.mean([x[:split_at] for x in xs],axis=0)))
-print('using geomean %s' % lloss(Y_valid, scipy.stats.gmean([x[:split_at] for x in xs], axis=0)))
-print('----------------------------')
-for x in xs:
-    print(roc_auc_score(y_true=Y_valid,y_score=x[:split_at]))
-print('------------->')
-print(roc_auc_score(y_true=Y_valid,y_score=logits_val))
-print('using mean %s' %roc_auc_score(Y_valid,np.mean([x[:split_at] for x in xs],axis=0)))
-print('using geomean %s' % roc_auc_score(Y_valid, scipy.stats.gmean([x[:split_at] for x in xs], axis=0)))
 
 
 

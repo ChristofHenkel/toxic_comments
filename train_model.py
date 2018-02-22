@@ -18,7 +18,7 @@ from utilities import loadGloveModel, coverage
 from sklearn.model_selection import train_test_split
 from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, COMMENT, LIST_CLASSES
 
-model_baseline = CAPS().cudnnrnn_caps
+model_baseline = CRNN().cudnn_cnn_rnn
 
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
 
@@ -40,20 +40,20 @@ class Config:
     mode_embeddings = 'fasttext_300d'
     if do_synthezize_embeddings:
         synth_threshold = 0.7
-    char_embedding_size = 500
+    char_embedding_size = 256
     bsize = 256
-    max_seq_len = 500
+    max_seq_len = 2000
     epochs = 15
-    model_name = 'cudrnn_caps_slim'
+    model_name = 'cudnn_cnn_rnn'
     root = ''
-    fp = 'models/CAPS/' + model_name + '/'
+    fp = 'models/CRNN/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
     max_models_to_keep = 1
     save_by_roc = False
 
-    level = 'word'
+    level = 'char'
     lr = 0.001
     keep_prob = 0.7
 
@@ -281,7 +281,7 @@ class Model:
             self.em = tf.placeholder(tf.float32, shape=(embedding_matrix.shape[0], embedding_matrix.shape[1]), name="em")
             self.keep_prob = tf.placeholder(dtype=tf.float32, name="keep_prob")
 
-            self.output = model_baseline(self.em,self.x,self.keep_prob,self.cfg.bsize) #self.cfg.bsize
+            self.output = model_baseline(self.em,self.x,self.keep_prob) #self.cfg.bsize
 
 
             with tf.variable_scope('logits'):

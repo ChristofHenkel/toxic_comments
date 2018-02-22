@@ -10,6 +10,7 @@ from nltk.tokenize import word_tokenize
 from nltk.tokenize import TweetTokenizer
 import logging
 from utilities import load_bad_words
+from textblob import TextBlob
 import tqdm
 from num2words import num2words
 from global_variables import COMMENT
@@ -526,7 +527,7 @@ class Preprocessor:
 
 
 
-def preprocess(data):
+def preprocess(data, add_polarity = False):
 
     print('preprocessing')
     p = Preprocessor()
@@ -537,6 +538,15 @@ def preprocess(data):
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_links_text(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.replace_numbers(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_bigrams(x))
+
+    if add_polarity:
+        print('adding polarity')
+        zpolarity = {0: 'zero', 1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight',
+                     9: 'nine', 10: 'ten'}
+        zsign = {-1: 'negative', 0.: 'neutral', 1: 'positive'}
+        data['polarity'] = data[COMMENT].map(lambda x: int(TextBlob(x).sentiment.polarity * 10))
+        data[COMMENT] = data.apply(lambda r: str(r[COMMENT]) + ' polarity' + zsign[np.sign(r['polarity'])] + zpolarity[np.abs(r['polarity'])],axis=1)
+
     #data[COMMENT] = data[COMMENT].str.replace(r"[^A-Za-z0-9(),!?@\'\`\"\_\n]", " ")
     return data
 

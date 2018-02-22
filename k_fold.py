@@ -19,8 +19,9 @@ TEST_DATA_FN = "assets/raw_data/test.csv"
 #TEST_DATA_FN = 'assets/raw_data/bagging_valid.csv'
 
 bsize = 512
-type_ = 'models/CAPS/'
-model = 'caps_first_test/'
+use_GPU = False
+type_ = 'models/RNN/'
+model = 'pavel_all_outs_do_0.6_slim/'
 
 logs = type_ + model + 'logs/'
 fn_words_dict = type_ + model + 'tc_words_dict.p'
@@ -90,7 +91,11 @@ def predict(epoch, X):
     tf.reset_default_graph()
     num_batches = len(X) // bsize + 1
     bsize_last_batch = len(X) % (bsize * (num_batches - 1))
-    sess = tf.InteractiveSession()
+
+    gpu_config = None
+    if not use_GPU:
+        gpu_config = tf.ConfigProto(device_count={'GPU': 0})
+    sess = tf.InteractiveSession(config=gpu_config)
 
     # load meta graph and restore weights
     saver = tf.train.import_meta_graph(logs + epoch + '.ckpt.meta')
@@ -102,7 +107,7 @@ def predict(epoch, X):
     #[print(n.name) for n in tf.get_default_graph().as_graph_def().node]
     for b in tqdm.tqdm(range(num_batches-1)):
         batch_x = X[b*bsize:(b+1)*bsize]
-        result = sess.run('fully_connected_3/Sigmoid:0', feed_dict={'x:0': batch_x,
+        result = sess.run('fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
                                                                     'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result)
@@ -113,7 +118,7 @@ def predict(epoch, X):
         batch_x = np.repeat(batch_x, b, axis=0)
         batch_x = batch_x[:bsize]
 
-        result = sess.run('fully_connected_3/Sigmoid:0', feed_dict={'x:0': batch_x,
+        result = sess.run('fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
                                                                     'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result[:bsize_last_batch])
@@ -205,7 +210,7 @@ def fold_submissions():
 
             new_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
             new_submission[LIST_CLASSES] = test_predicts
-            new_submission.to_csv(type_ + model + "test_data_folded_by_mean2.csv", index=False)
+            new_submission.to_csv(type_ + model + model[:-1] + "_test_data_folded.csv", index=False)
 
 
 for epoch in epochs:
