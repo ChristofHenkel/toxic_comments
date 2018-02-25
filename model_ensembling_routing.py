@@ -17,7 +17,7 @@ from global_variables import LIST_CLASSES, LIST_LOGITS
 
 
 
-csvs_train = ['models/CNN/inception2_slim/baggin_logits_folded.csv',
+csvs_train = ['models/CNN/inception2_slim/l2_valid_data.csv',
               'models/NBSVM/slim/nbsvm_prediction_valid.csv',
               ]
 

@@ -226,3 +226,21 @@ def logloss(y_true,y_pred):
         l += log_loss(y_true=y_true[:,i],y_pred=y_pred[:,i])
     l /= 6
     return l
+
+def load_config(cfg, model_fp):
+    with open(model_fp + 'config.txt') as f:
+        content = f.readlines()
+
+    settings = [s.strip() for s in content[3:]]
+
+    for item in settings:
+        try:
+            name, value = item.split(' = ')
+            try:
+                value = int(value)
+            except:
+                pass
+            cfg.__dict__[name] = value
+        except:
+            pass
+    return cfg

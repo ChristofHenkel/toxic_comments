@@ -71,7 +71,6 @@ class CNNTransformer:
         return seq
 
 
-
 class Preprocessor:
 
     def __init__(self,max_number_of_words = None,min_count_words=5,keep_words=0.9,min_count_chars=20,keep_chars = 0.9):
@@ -265,9 +264,8 @@ class Preprocessor:
 
     @staticmethod
     def rm_links_text(text):
-        text = re.sub("http://. * ","", text)
-        text = re.sub("http://. * ", "", text)
-        text = re.sub("www..* ", "", text)
+        text = re.sub("http?s://.* ","<URL>", text)
+        text = re.sub("www.* ", "<URL>", text)
         return text
 
     @staticmethod
@@ -294,17 +292,17 @@ class Preprocessor:
 
     @staticmethod
     def rm_user(text):
-        text = re.sub("\[\[User(.*)\|","", text)
+        text = re.sub("\[\[User(.*)\|","<USER>", text)
         return text
 
     @staticmethod
     def rm_ip(text):
-        text = re.sub("\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}","",text)
+        text = re.sub("\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}","<IP>",text)
         return text
 
     @staticmethod
     def rm_article_id(text):
-        text = re.sub("\d:\d\d\s{0,5}$","" ,text)
+        text = re.sub("\d:\d\d\s{0,5}$","<article_id>" ,text)
         return text
 
     @staticmethod
@@ -525,6 +523,35 @@ class Preprocessor:
             res[k][:len(seq)] = seq
         return res
 
+    @staticmethod
+    def glove_preprocess(text):
+        """
+        adapted from https://nlp.stanford.edu/projects/glove/preprocess-twitter.rb
+
+        """
+        # Different regex parts for smiley faces
+        eyes = "[8:=;]"
+        nose = "['`\-]?"
+        text = re.sub("https?:* ", "<URL>", text)
+        text = re.sub("www.* ", "<URL>", text)
+        text = re.sub("\[\[User(.*)\|", '<USER>', text)
+        text = re.sub("<3", '<HEART>', text)
+        text = re.sub("[-+]?[.\d]*[\d]+[:,.\d]*", "<NUMBER>", text)
+        text = re.sub(eyes + nose + "[Dd)]", '<SMILE>', text)
+        text = re.sub("[(d]" + nose + eyes, '<SMILE>', text)
+        text = re.sub(eyes + nose + "p", '<LOLFACE>', text)
+        text = re.sub(eyes + nose + "\(", '<SADFACE>', text)
+        text = re.sub("\)" + nose + eyes, '<SADFACE>', text)
+        text = re.sub(eyes + nose + "[/|l*]", '<NEUTRALFACE>', text)
+        text = re.sub("/", " / ", text)
+        text = re.sub("[-+]?[.\d]*[\d]+[:,.\d]*", "<NUMBER>", text)
+        text = re.sub("([!]){2,}", "! <REPEAT>", text)
+        text = re.sub("([?]){2,}", "? <REPEAT>", text)
+        text = re.sub("([.]){2,}", ". <REPEAT>", text)
+        pattern = re.compile(r"(.)\1{2,}")
+        text = pattern.sub(r"\1" + " <ELONG>", text)
+
+        return text
 
 
 def preprocess(data, add_polarity = False):
@@ -549,8 +576,6 @@ def preprocess(data, add_polarity = False):
 
     #data[COMMENT] = data[COMMENT].str.replace(r"[^A-Za-z0-9(),!?@\'\`\"\_\n]", " ")
     return data
-
-
 
 
 

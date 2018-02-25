@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from tensorflow.contrib.keras.api.keras.losses import binary_crossentropy
-from keras.layers import CuDNNGRU, Dropout, Bidirectional
+from keras.layers import CuDNNGRU, Dropout, Bidirectional, SpatialDropout1D
 import tensorflow as tf
 from collections import Counter
 from utilities import get_oov_vector
@@ -16,16 +16,15 @@ from augmentation import retranslation, mixup, synonyms
 from architectures import CNN, CAPS
 import pickle
 from utilities import loadGloveModel, coverage
-from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD
+from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, LIST_CLASSES, TRAIN_SLIM_FILENAME, TEST_FILENAME, COMMENT
 
-LIST_CLASSES = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
 
-train_data = pd.read_csv("assets/raw_data/bagging_train.csv")
-test_data = pd.read_csv("assets/raw_data/test.csv")
+train_data = pd.read_csv(TRAIN_SLIM_FILENAME)
+test_data = pd.read_csv(TEST_FILENAME)
 
-sentences_train = train_data["comment_text"].fillna("_NAN_").values
-sentences_test = test_data["comment_text"].fillna("_NAN_").values
+sentences_train = train_data[COMMENT].fillna(NAN_WORD).values
+sentences_test = test_data[COMMENT].fillna(NAN_WORD).values
 
 class Config:
 
@@ -39,7 +38,7 @@ class Config:
     bsize = 128
     max_seq_len = 500
     epochs = 20
-    model_name = 'caps_4'
+    model_name = 'inception_v4'
     root = ''
     fp = 'models/DEBUGS/' + model_name + '/'
     logs_path = fp + 'logs/'
@@ -48,7 +47,7 @@ class Config:
     max_models_to_keep = 1
     save_by_roc = False
 
-    lr = 0.01
+    lr = 0.001
     keep_prob = 0.7
 
 class ToxicComments:
@@ -386,7 +385,7 @@ def routing(input, b_IJ, iter_routing=3, caps_dim_in=6, caps_dim_out=8, num_caps
 
 cfg = Config
 graph = tf.Graph()
-bsize = 128
+bsize = 256
 
 with graph.as_default():
     # tf Graph input
@@ -397,92 +396,20 @@ with graph.as_default():
     em = tf.placeholder(tf.float32, shape=(embedding_matrix.shape[0], embedding_matrix.shape[1]), name="em")
     keep_prob = tf.placeholder(dtype=tf.float32, name="keep_prob")
 
-    n_caps = 6
-    n_capfilter = 32
     with tf.name_scope("Embedding"):
-        # embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
-        embedded_input = tf.nn.embedding_lookup(em, x, name="embedded_input")
+        # embedding = tf.get_variable("embedding", tf.shape(embedding_matrix), dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+        embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
 
-    conv1 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=1, strides=2)
-    conv3 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=3, strides=2)
-    conv5 = tf.layers.conv1d(embedded_input, filters=128, kernel_size=5, strides=2)
-    conv = tf.concat([conv1, conv3, conv5], axis=1)
-    conv = tf.transpose(conv,[0,2,1])
+        embedded_input = SpatialDropout1D(0.2)(embedded_input)
+        embedded_input = tf.cast(embedded_input, tf.float32)
 
+    h1 = tf.contrib.layers.fully_connected(embedded_input, 512, activation_fn=tf.nn.relu)
+    h2 = tf.contrib.layers.fully_connected(h1, 512, activation_fn=tf.nn.relu)
+    h3 = tf.contrib.layers.fully_connected(h2, 512, activation_fn=tf.nn.relu)
+    h_flat = tf.layers.flatten(h3)
+    h_flat = tf.nn.dropout(h_flat, keep_prob=keep_prob)
 
-    with tf.variable_scope('PrimaryCaps_layer'):
-        capsules = tf.layers.conv1d(conv, filters=n_capfilter * n_caps,
-                                    kernel_size=9,
-                                    strides=2,
-                                    activation=tf.nn.relu)
-        capsules = tf.expand_dims(capsules, 3)
-        capsules = tf.reshape(capsules, (bsize, 60 * n_capfilter, n_caps, 1))
-        capsules = squash(capsules)
-
-    with tf.variable_scope('FCCaps_layer'):
-        # digitCaps = CapsLayer(num_outputs=10, vec_len=16, with_routing=True, layer_type='FC')
-        # caps2 = digitCaps(capsules_squashed)
-
-        input = tf.reshape(capsules, shape=(bsize, 60 * 32, 1, n_caps, 1))
-
-    with tf.variable_scope('routing'):
-        # b_IJ: [batch_size, num_caps_l, num_caps_l_plus_1, 1, 1],
-        # about the reason of using 'batch_size', see issue #21
-        b_IJ = tf.constant(np.zeros([bsize, input.shape[1].value, 6, 1, 1], dtype=np.float32))
-        capsules = routing(input, b_IJ, num_caps_out=6, caps_dim_out=8)
-        capsules = tf.squeeze(capsules, axis=1)
-
-    #cap_norms = tf.norm(capsules, axis=2)[:,:,0]
-    #cap_norms = tf.minimum(tf.maximum(cap_norms,0),1)
-
-    flat_capsules = tf.layers.flatten(capsules)
-
-    logits = tf.contrib.layers.fully_connected(flat_capsules, 6, activation_fn=tf.nn.sigmoid)
-
-    """
-    caps_len = 8
-    caps_filters = 32
-
-    # Primary Capsules layer, return [batch_size, ? , 8, 1]
-    with tf.variable_scope('PrimaryCaps_layer'):
-        capsules = tf.layers.conv1d(caps_input, filters=caps_filters * caps_len,
-                                    kernel_size=3,
-                                    strides=1,
-                                    activation=tf.nn.relu)
-        capsules = tf.layers.conv1d(capsules, filters=caps_filters * caps_len,
-                                    kernel_size=3,
-                                    strides=2,
-                                    activation=tf.nn.relu)
-        capsules = tf.layers.conv1d(capsules, filters=caps_filters * caps_len,
-                                    kernel_size=3,
-                                    strides=2,
-                                    activation=tf.nn.relu)
-        capsules = tf.layers.conv1d(capsules, filters=caps_filters * caps_len,
-                                    kernel_size=3,
-                                    strides=2,
-                                    activation=tf.nn.relu)
-        capsules = tf.expand_dims(capsules, 3)
-        caps_size = capsules.get_shape()[1]
-        capsules = tf.reshape(capsules, (bsize,  caps_size * caps_filters, caps_len, 1))
-        squashed_capsules = squash(capsules)
-
-    with tf.variable_scope('FCCaps_layer'):
-        # digitCaps = CapsLayer(num_outputs=10, vec_len=16, with_routing=True, layer_type='FC')
-        # caps2 = digitCaps(capsules_squashed)
-
-        input = tf.reshape(squashed_capsules, shape=(bsize, caps_size * caps_filters, 1, caps_len, 1))
-
-        with tf.variable_scope('routing'):
-            # b_IJ: [batch_size, num_caps_l, num_caps_l_plus_1, 1, 1],
-            # about the reason of using 'batch_size', see issue #21
-            b_IJ = tf.constant(np.zeros([bsize, input.shape[1].value, 10, 1, 1], dtype=np.float32))
-            capsules = routing(input, b_IJ)
-            capsules = tf.squeeze(capsules, axis=1)
-
-        flat_capsules = tf.layers.flatten(capsules)
-
-        logits = tf.contrib.layers.fully_connected(flat_capsules, 6, activation_fn=tf.nn.sigmoid)
-    """
+    logits = tf.contrib.layers.fully_connected(h_flat, 6, activation_fn=tf.nn.sigmoid)
 
     with tf.variable_scope('loss'):
         loss = binary_crossentropy(y, logits)
@@ -500,7 +427,7 @@ valid_iters = len(X_valid) - (cfg.bsize *2)
 
 
 
-with tf.Session(graph=graph) as sess:
+with tf.Session(graph=graph, config=tf.ConfigProto(device_count={'GPU': 0})) as sess:
 
     init = tf.global_variables_initializer()
     sess.run(init)

@@ -12,23 +12,26 @@ import os
 import time
 from preprocess_utils import Preprocessor, preprocess
 from augmentation import retranslation, mixup, synonyms
-from architectures import CNN, CAPS, BIRNN, CRNN
+from architectures import CNN, CAPS, BIRNN, CRNN, DENSE, CNNRNN
 import pickle
 from utilities import loadGloveModel, coverage
 from sklearn.model_selection import train_test_split
-from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, COMMENT, LIST_CLASSES
+from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, COMMENT, LIST_CLASSES, VALID_SLIM_FILENAME, TRAIN_SLIM_FILENAME
 
-model_baseline = CRNN().cudnn_cnn_rnn
+model_baseline = CNNRNN().cudnn_cnn_rnn2
 
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
 
-train_data = pd.read_csv("assets/raw_data/bagging_train.csv")
+# TODO add decay
+#global_step = tf.Variable(0, trainable=False)
+#starter_learning_rate = 0.1
+#learning_rate = tf.train.exponential_decay(starter_learning_rate, global_step,
+#                                       100000, 0.96, staircase=True)
 
-#t, v = train_test_split(train_data,test_size=0.2, random_state=123)
-#t.to_csv("assets/raw_data/bagging_train.csv")
-#v.to_csv("assets/raw_data/bagging_valid.csv")
-
-test_data = pd.read_csv("assets/raw_data/bagging_valid.csv")
+## Passing global_step to minimize() will increment it at each step.
+#learning_step = (
+#tf.train.GradientDescentOptimizer(learning_rate)
+#.minimize(...my loss..., global_step=global_step))
 
 
 class Config:
@@ -41,27 +44,31 @@ class Config:
     if do_synthezize_embeddings:
         synth_threshold = 0.7
     char_embedding_size = 256
-    bsize = 256
-    max_seq_len = 2000
+    min_count_chars = 10
+    bsize = 128
+    max_seq_len = 500
     epochs = 15
-    model_name = 'cudnn_cnn_rnn'
+    model_name = 'cudnn_slim'
     root = ''
-    fp = 'models/CRNN/' + model_name + '/'
+    fp = 'models/CNNRNN/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
     max_models_to_keep = 1
     save_by_roc = False
-
-    level = 'char'
-    lr = 0.001
-    keep_prob = 0.7
+    level = 'word'
+    lr = 0.0001
+    decay = 0.95
+    decay_steps = 400
+    keep_prob = 0.5
+    do_create_l2_train_data = True
+    use_saved_embedding_matrix = True
 
 class ToxicComments:
 
-    def __init__(self,Config):
+    def __init__(self,cfg):
         self.preprocessor = Preprocessor()
-        self.cfg = Config()
+        self.cfg = cfg
         self.word_counter = Counter()
         self.words_dict = {}
 
@@ -201,20 +208,27 @@ class ToxicComments:
             print('loading Fasttext 300d')
             model = KeyedVectors.load_word2vec_format('assets/embedding_models/ft_300d_crawl/crawl-300d-2M.vec', binary=False)
             embedding_word_dict = {w: ind for ind, w in enumerate(model.index2word)}
+            embedding_size = 300
         elif self.cfg.mode_embeddings == 'mini_fasttext_300d':
             model = KeyedVectors.load_word2vec_format('assets/embedding_models/ft_300d_crawl/mini_fasttext_300d2.vec',binary=False)
             embedding_word_dict = {w: ind for ind, w in enumerate(model.index2word)}
+            embedding_size = 300
         elif self.cfg.mode_embeddings == 'fasttext_wiki_300d':
             model = FastText.load_fasttext_format('assets/embedding_models/ft_wiki/wiki.en.bin')
             embedding_word_dict = {w: ind for ind, w in enumerate(model.wv.index2word)}
+            embedding_size = 300
         elif self.cfg.mode_embeddings == 'glove_300d':
             model = loadGloveModel('assets/embedding_models/glove/glove.840B.300d.txt',dims=300)
             embedding_word_dict = {w: ind for ind, w in enumerate(model)}
+            embedding_size = 300
+        elif self.cfg.mode_embeddings == 'glove_twitter_200d':
+            model = loadGloveModel('assets/embedding_models/glove/glove.twitter.27B.200d.txt',dims=200)
+            embedding_word_dict = {w: ind for ind, w in enumerate(model)}
+            embedding_size = 200
         else:
             model = None
+            embedding_size = None
 
-
-        embedding_size = 300
 
         print("Preparing data...")
         if not self.cfg.mode_embeddings == 'fasttext_wiki_300d':
@@ -281,6 +295,7 @@ class Model:
             self.em = tf.placeholder(tf.float32, shape=(embedding_matrix.shape[0], embedding_matrix.shape[1]), name="em")
             self.keep_prob = tf.placeholder(dtype=tf.float32, name="keep_prob")
 
+
             self.output = model_baseline(self.em,self.x,self.keep_prob) #self.cfg.bsize
 
 
@@ -291,9 +306,10 @@ class Model:
                 self.loss = binary_crossentropy(self.y,self.logits)
                 self.cost = tf.losses.log_loss(predictions=self.logits, labels=self.y)
                 (_, self.auc_update_op) = tf.metrics.auc(predictions=self.logits,labels=self.y,curve='ROC')
-
+            self.global_step = tf.Variable(0, trainable=False)
+            self.learning_rate = tf.train.exponential_decay(self.cfg.lr, self.global_step,self.cfg.decay_steps, 0.96, staircase=True)
             with tf.variable_scope('optim'):
-                self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.cfg.lr).minimize(self.loss)
+                self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate).minimize(self.loss,global_step=self.global_step)
 
             with tf.variable_scope('saver'):
                 self.saver = tf.train.Saver(max_to_keep=self.cfg.max_models_to_keep)
@@ -313,6 +329,8 @@ class Model:
             model_name = 'k%s_e%s.ckpt' % (fold_id,epoch)
             s_path = self.saver.save(sess, self.cfg.logs_path + model_name)
             print("Model saved in file: %s" % s_path)
+
+
 
 
     def train(self, X_train, Y_train, X_valid, Y_valid, X_test, embedding_matrix, fold_id=0, do_submission = False):
@@ -356,7 +374,7 @@ class Model:
                     batch_x_valid = X_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
                     batch_y_valid = Y_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
                     #batch_z_valid = Z_valid[vstep * self.cfg.bsize:(vstep + 1) * self.cfg.bsize]
-                    test_cost_, valid_loss, roc_auc_valid = sess.run([self.cost,self.loss,self.auc_update_op],
+                    test_cost_, valid_loss, roc_auc_valid, used_lr = sess.run([self.cost,self.loss,self.auc_update_op,self.learning_rate],
                                                                     feed_dict={self.x: batch_x_valid,
                                                            self.y: batch_y_valid,
                                                         self.em: embedding_matrix,
@@ -368,6 +386,7 @@ class Model:
                 avg_cost = np.log(np.mean(np.exp(vcosts)))
                 toc = time.time()
                 print('time needed %s' %(toc-tic))
+                print('learning_rate %s' % used_lr)
                 print('valid loss: %s' % avg_cost)
                 print('roc auc test : {:.4}'.format(roc_auc_valid))
                 print('roc auc train : {:.4}'.format(roc_auc_train))
@@ -411,7 +430,16 @@ class Model:
 
 def train_folds(fold_count=10):
 
-    tc = ToxicComments(Config)
+    #train_data = pd.read_csv("assets/raw_data/bagging_train.csv")
+    #train_data = pd.read_csv('train_e0.csv')
+    train_data = pd.read_csv(TRAIN_SLIM_FILENAME)
+    # t, v = train_test_split(train_data,test_size=0.2, random_state=123)
+    # t.to_csv("assets/raw_data/bagging_train.csv")
+    # v.to_csv("assets/raw_data/bagging_valid.csv")
+
+    test_data = pd.read_csv(VALID_SLIM_FILENAME)
+    cfg = Config()
+    tc = ToxicComments(cfg)
 
     if tc.cfg.do_preprocess:
         train_data = preprocess(train_data)
@@ -430,11 +458,19 @@ def train_folds(fold_count=10):
 
         sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
         #sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
-        embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
-        coverage(tokenized_sentences_train,embedding_word_dict)
-        with open(tc.cfg.fp + 'embedding_word_dict.p','wb') as f:
-            pickle.dump(embedding_word_dict,f)
-        np.save(tc.cfg.fp + 'embedding.npy',embedding_matrix)
+        if cfg.use_saved_embedding_matrix:
+            with open(tc.cfg.fp + 'embedding_word_dict.p','rb') as f:
+                embedding_word_dict = pickle.load(f)
+            embedding_matrix = np.load(tc.cfg.fp + 'embedding.npy')
+            id_to_embedded_word = dict((id, word) for word, id in embedding_word_dict.items())
+
+        else:
+            embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
+            coverage(tokenized_sentences_train,embedding_word_dict)
+            with open(tc.cfg.fp + 'embedding_word_dict.p','wb') as f:
+                pickle.dump(embedding_word_dict,f)
+            np.save(tc.cfg.fp + 'embedding.npy',embedding_matrix)
+
         train_list_of_token_ids = tc.convert_tokens_to_ids(sequences_train, embedding_word_dict)
         #test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
 
@@ -442,9 +478,12 @@ def train_folds(fold_count=10):
         #X_test = np.array(test_list_of_token_ids)
         X_test = None
     else:
-        tc.preprocessor.min_count_chars = 10
+        tc.preprocessor.min_count_chars = tc.cfg.min_count_chars
 
         tc.preprocessor.create_char_vocabulary(sentences_train)
+        with open(tc.cfg.fp + 'char2index.p','wb') as f:
+            pickle.dump(tc.preprocessor.char2index,f)
+
         X = tc.preprocessor.char2seq(sentences_train, maxlen=tc.cfg.max_seq_len)
         embedding_matrix = np.zeros((tc.preprocessor.char_vocab_size, tc.cfg.char_embedding_size))
 
@@ -469,57 +508,3 @@ def train_folds(fold_count=10):
         m.set_graph(embedding_matrix)
         m.train(X_train, Y_train, X_valid, Y_valid, X_test, embedding_matrix, fold_id)
 
-def predict(sentences_test=None, X_test=None, do_submission = False):
-    bsize = 512
-    type_ = 'models/CNN/'
-    model = 'vgg_4/'
-    epoch = 'k0_e3'
-    logs = type_ + model + 'logs/' + epoch
-
-    if sentences_test is not None:
-        with open(Config().fp + 'tc.p','wb') as f:
-            tc = pickle.load(f)
-        tokenized_sentences_test = tc.tokenize_sentences(sentences_test, tc.words_dict)
-        sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
-        test_list_of_token_ids = tc.convert_tokens_to_ids(sequences_test, embedding_word_dict)
-        X_test = np.array(test_list_of_token_ids)
-
-    num_batches = len(X_test) // bsize + 1
-    bsize_last_batch = len(X_test) % (num_batches - 1)
-    sess = tf.InteractiveSession()
-
-    # load meta graph and restore weights
-    saver = tf.train.import_meta_graph(logs + '.ckpt.meta')
-    saver.restore(sess,logs + '.ckpt')
-
-    results = []
-    #[n.name for n in tf.get_default_graph().as_graph_def().node]
-    for b in tqdm.tqdm(range(num_batches-1)):
-        batch_x = X_test[b*bsize:(b+1)*bsize]
-        result = sess.run('FCCaps_layer/fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
-                                                              'keep_prob:0': 1})
-        results.append(result)
-
-    if bsize_last_batch > 0:
-        batch_x = X_test[(num_batches-1) * bsize:num_batches * bsize]
-        b = bsize // bsize_last_batch + 1
-        batch_x = np.repeat(batch_x, b, axis=0)
-        batch_x = batch_x[:bsize]
-
-        result = sess.run('FCCaps_layer/fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
-                                                              'keep_prob:0': 1})
-        results.append(result[:bsize_last_batch])
-
-
-    results = np.concatenate( results, axis=0 )
-
-    if do_submission:
-        sample_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
-        sample_submission[LIST_CLASSES] = results
-        if not os.path.exists(type_ + model + 'submissions/'):
-            os.mkdir(type_ + model + 'submissions/')
-
-        fn = type_ + model + 'submissions/'
-        fn += model[:-1] + epoch + '.csv'
-        sample_submission.to_csv(fn, index=False)
-    return results
