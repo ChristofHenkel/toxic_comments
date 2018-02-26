@@ -16,9 +16,9 @@ from architectures import CNN, CAPS, BIRNN, CRNN, DENSE, CNNRNN
 import pickle
 from utilities import loadGloveModel, coverage
 from sklearn.model_selection import train_test_split
-from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, COMMENT, LIST_CLASSES, VALID_SLIM_FILENAME, TRAIN_SLIM_FILENAME
+from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, COMMENT, LIST_CLASSES, VALID_SLIM_FILENAME, TRAIN_SLIM_FILENAME, TEST_FILENAME
 
-model_baseline = CNNRNN().cudnn_cnn_rnn2
+model_baseline = BIRNN().gru64_sd
 
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
 
@@ -37,6 +37,7 @@ results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_
 class Config:
 
     do_preprocess = True
+    add_polarity = False
     do_augmentation_with_translate = False
     do_augmentation_with_mixup = False
     do_synthezize_embeddings = False
@@ -45,24 +46,25 @@ class Config:
         synth_threshold = 0.7
     char_embedding_size = 256
     min_count_chars = 10
-    bsize = 128
+    bsize = 512
     max_seq_len = 500
     epochs = 15
-    model_name = 'cudnn_slim'
+    model_name = 'gru64_sdb'
     root = ''
-    fp = 'models/CNNRNN/' + model_name + '/'
+    fp = 'models/RNN/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
     max_models_to_keep = 1
     save_by_roc = False
     level = 'word'
-    lr = 0.0001
-    decay = 0.95
+    lr = 0.001
+    decay = 1
     decay_steps = 400
-    keep_prob = 0.5
+    keep_prob = 0.7
     do_create_l2_train_data = True
-    use_saved_embedding_matrix = True
+    use_saved_embedding_matrix = False
+    regularization_scale = None #0.0001
 
 class ToxicComments:
 
@@ -70,9 +72,9 @@ class ToxicComments:
         self.preprocessor = Preprocessor()
         self.cfg = cfg
         self.word_counter = Counter()
-        self.words_dict = {}
+        self.word2id = {}
 
-    def tokenize_sentences(self,sentences, words_dict, mode = 'twitter'):
+    def tokenize_sentences(self,sentences, mode = 'twitter'):
         twitter_tokenizer = TweetTokenizer()
         tokenized_sentences = []
         for sentence in tqdm.tqdm(sentences,mininterval=5):
@@ -85,16 +87,22 @@ class ToxicComments:
                 tokens = twitter_tokenizer.tokenize(sentence)
             else:
                 tokens = None
-            result = []
-            self.word_counter.update(tokens)
-            for word in tokens:
-                self.word_counter.update([word])
-                word = word.lower()
-                if word not in words_dict:
-                    words_dict[word] = len(words_dict)
-                result.append(word)
-            tokenized_sentences.append(result)
-        return tokenized_sentences, words_dict
+            tokenized_sentences.append(tokens)
+        return tokenized_sentences
+
+    def create_word2id(self, list_of_tokenized_sentences):
+        print('CREATING VOCABULARY')
+        for tokenized_sentences in list_of_tokenized_sentences:
+            for tokens in tqdm.tqdm(tokenized_sentences):
+                self.word_counter.update(tokens)
+                for word in tokens:
+                    if word not in self.word2id:
+                        self.word2id[word] = len(self.word2id)
+        self.word2id[UNKNOWN_WORD] = len(self.word2id)
+        self.id2word = dict((id, word) for word, id in self.word2id.items())
+        print('finished')
+
+
 
     def tokenized_sentences2seq(self,tokenized_sentences, words_dict):
         sequences = []
@@ -109,16 +117,16 @@ class ToxicComments:
         return sequences
 
     def update_words_dict(self,tokenized_sentences):
-        self.words_dict.pop(UNKNOWN_WORD, None)
+        self.word2id.pop(UNKNOWN_WORD, None)
         k = 0
         for sentence in tokenized_sentences:
             for token in sentence:
-                if token not in self.words_dict:
+                if token not in self.word2id:
                     k += 1
-                    self.words_dict[token] = len(self.words_dict)
+                    self.word2id[token] = len(self.word2id)
         print('{} words added'.format(k))
-        self.words_dict[UNKNOWN_WORD] = len(self.words_dict)
-        self.id2word = dict((id, word) for word, id in self.words_dict.items())
+        self.word2id[UNKNOWN_WORD] = len(self.word2id)
+        self.id2word = dict((id, word) for word, id in self.word2id.items())
 
     def clear_embedding_list(self,model, embedding_word_dict, words_dict):
         cleared_embedding_list = []
@@ -249,15 +257,15 @@ class ToxicComments:
         id_to_embedded_word = dict((id, word) for word, id in embedding_word_dict.items())
         return embedding_matrix, embedding_word_dict, id_to_embedded_word
 
-    def fit_tokenizer(self,list_of_sentences):
+    def tokenize_list_of_sentences(self,list_of_sentences):
 
         list_of_tokenized_sentences = []
         for sentences in list_of_sentences:
-            tokenized_sentences, self.words_dict = self.tokenize_sentences(sentences, self.words_dict)
-            list_of_tokenized_sentences.append(tokenized_sentences)
+            tokenized_sentences = self.tokenize_sentences(sentences)
 
-        self.words_dict[UNKNOWN_WORD] = len(self.words_dict)
-        self.id2word = dict((id, word) for word, id in self.words_dict.items())
+            # more preprocess on word level
+            tokenized_sentences = [self.preprocessor.rm_hyperlinks(s) for s in tokenized_sentences]
+            list_of_tokenized_sentences.append(tokenized_sentences)
 
         return list_of_tokenized_sentences
 
@@ -307,7 +315,8 @@ class Model:
                 self.cost = tf.losses.log_loss(predictions=self.logits, labels=self.y)
                 (_, self.auc_update_op) = tf.metrics.auc(predictions=self.logits,labels=self.y,curve='ROC')
             self.global_step = tf.Variable(0, trainable=False)
-            self.learning_rate = tf.train.exponential_decay(self.cfg.lr, self.global_step,self.cfg.decay_steps, 0.96, staircase=True)
+            self.learning_rate = tf.train.exponential_decay(self.cfg.lr, self.global_step,self.cfg.decay_steps, self.cfg.decay, staircase=True)
+
             with tf.variable_scope('optim'):
                 self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate).minimize(self.loss,global_step=self.global_step)
 
@@ -437,26 +446,37 @@ def train_folds(fold_count=10):
     # t.to_csv("assets/raw_data/bagging_train.csv")
     # v.to_csv("assets/raw_data/bagging_valid.csv")
 
-    test_data = pd.read_csv(VALID_SLIM_FILENAME)
+    valid_data = pd.read_csv(VALID_SLIM_FILENAME)
+    test_data = pd.read_csv(TEST_FILENAME)
     cfg = Config()
     tc = ToxicComments(cfg)
 
     if tc.cfg.do_preprocess:
-        train_data = preprocess(train_data)
-        test_data = preprocess(test_data)
+        if tc.cfg.add_polarity:
+            train_data = preprocess(train_data,add_polarity=True)
+            valid_data = preprocess(valid_data,add_polarity=True)
+            test_data = preprocess(test_data, add_polarity=True)
+        else:
+            train_data = preprocess(train_data)
+            valid_data = preprocess(valid_data)
+            test_data = preprocess(test_data)
 
     sentences_train = train_data["comment_text"].fillna("_NAN_").values
+    sentences_valid = valid_data["comment_text"].fillna("_NAN_").values
     sentences_test = test_data["comment_text"].fillna("_NAN_").values
     Y = train_data[LIST_CLASSES].values
 
     if tc.cfg.level == 'word':
-        tokenized_sentences_train, tokenized_sentences_test = tc.fit_tokenizer([sentences_train,sentences_test])
+        tokenized_sentences_train, tokenized_sentences_valid,tokenized_sentences_test = tc.tokenize_list_of_sentences([sentences_train,sentences_valid,sentences_test])
+        tokenized_sentences_train = [tc.preprocessor.rm_hyperlinks(s) for s in tokenized_sentences_train]
+        tokenized_sentences_valid = [tc.preprocessor.rm_hyperlinks(s) for s in tokenized_sentences_valid]
+        tokenized_sentences_test = [tc.preprocessor.rm_hyperlinks(s) for s in tokenized_sentences_test]
 
-
+        tc.create_word2id([tokenized_sentences_train,tokenized_sentences_valid,tokenized_sentences_test])
         with open(tc.cfg.fp + 'tc_words_dict.p','wb') as f:
-            pickle.dump(tc.words_dict,f)
+            pickle.dump(tc.word2id, f)
 
-        sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.words_dict)
+        sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, tc.word2id)
         #sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, tc.words_dict)
         if cfg.use_saved_embedding_matrix:
             with open(tc.cfg.fp + 'embedding_word_dict.p','rb') as f:
@@ -465,7 +485,7 @@ def train_folds(fold_count=10):
             id_to_embedded_word = dict((id, word) for word, id in embedding_word_dict.items())
 
         else:
-            embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.words_dict)
+            embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.word2id)
             coverage(tokenized_sentences_train,embedding_word_dict)
             with open(tc.cfg.fp + 'embedding_word_dict.p','wb') as f:
                 pickle.dump(embedding_word_dict,f)

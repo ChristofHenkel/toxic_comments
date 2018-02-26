@@ -700,6 +700,51 @@ class BIRNN:
         logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
+
+    def pavel_all_outs2(self,embedding_matrix, x, keep_prob):
+
+        rnn_units = 64
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        with tf.variable_scope('forward'):
+
+            fw_cell1 = tf.nn.rnn_cell.GRUCell(rnn_units)
+            fw_cell1 = tf.nn.rnn_cell.DropoutWrapper(fw_cell1, output_keep_prob=keep_prob)
+            fw_cell2 = tf.nn.rnn_cell.GRUCell(rnn_units)
+            stacked_fw_rnn = [fw_cell1,fw_cell2]
+            fw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_fw_rnn, state_is_tuple=True)
+
+        with tf.variable_scope('backward'):
+            bw_cell1 = tf.nn.rnn_cell.GRUCell(rnn_units)
+            bw_cell1 = tf.nn.rnn_cell.DropoutWrapper(bw_cell1, output_keep_prob=keep_prob)
+            bw_cell2 = tf.nn.rnn_cell.GRUCell(rnn_units)
+            stacked_bw_rnn = [bw_cell1,bw_cell2]
+            bw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_bw_rnn, state_is_tuple=True)
+
+        outputs, _ = tf.nn.bidirectional_dynamic_rnn(fw_multi_cell, bw_multi_cell, embedded_input, dtype=tf.float32)
+        output_fw, output_bw = outputs
+
+        outputs = tf.concat([output_fw, output_bw], axis = 2)
+
+        alphas = self._attention_mechanism(outputs, attention_layer_size=10, rnn_units=rnn_units, maxSeqLength=500)
+        # encodings is of shape (batch_size, 2 * self.lstm_size)
+        encodings = tf.reduce_sum(alphas * outputs, 1)
+        outputs = tf.transpose(outputs, [0, 2, 1])
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+
+        x3 = tf.concat([maxs, means, last,encodings], axis=1)
+
+        #x3 = layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+
+
     @staticmethod
     def ugrnn_all_outs(embedding_matrix, x, keep_prob):
 
@@ -841,6 +886,86 @@ class BIRNN:
         encodings = tf.reduce_sum(alphas * outputs, 1)
 
         x3 = layers.fully_connected(encodings, 32, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
+    def gru64_2(embedding_matrix, x, keep_prob,regularization_scale):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        with tf.variable_scope('forward'):
+
+            fw_cell1 = tf.nn.rnn_cell.GRUCell(64)
+            fw_cell1 = tf.nn.rnn_cell.DropoutWrapper(fw_cell1, output_keep_prob=keep_prob)
+            fw_cell2 = tf.nn.rnn_cell.GRUCell(64)
+            stacked_fw_rnn = [fw_cell1,fw_cell2]
+            fw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_fw_rnn, state_is_tuple=True)
+
+        with tf.variable_scope('backward'):
+            bw_cell1 = tf.nn.rnn_cell.GRUCell(64)
+            bw_cell1 = tf.nn.rnn_cell.DropoutWrapper(bw_cell1, output_keep_prob=keep_prob)
+            bw_cell2 = tf.nn.rnn_cell.GRUCell(64)
+            stacked_bw_rnn = [bw_cell1,bw_cell2]
+            bw_multi_cell = tf.contrib.rnn.MultiRNNCell(cells=stacked_bw_rnn, state_is_tuple=True)
+
+        outputs, _ = tf.nn.bidirectional_dynamic_rnn(fw_multi_cell, bw_multi_cell, embedded_input, dtype=tf.float32)
+        output_fw, output_bw = outputs
+
+        outputs = tf.concat([output_fw, output_bw], axis = 2)
+
+        outputs = tf.transpose(outputs, [0, 2, 1])
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last], axis=1)
+
+        #x3 = layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid,weights_regularizer=tf.contrib.layers.l2_regularizer(scale=regularization_scale))
+        return logits
+
+    @staticmethod
+    def gru64_base(embedding_matrix, x, keep_prob):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(embedded_input)
+        x2 = tf.transpose(x2, [0, 2, 1])
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = x2
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last], axis=1)
+
+        #x3 = layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
+    def gru64_sd(embedding_matrix, x, keep_prob):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+        x2 = SpatialDropout1D(0.2)(embedded_input)
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(x2)
+        x2 = tf.transpose(x2, [0, 2, 1])
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = x2
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last], axis=1)
+
+        #x3 = layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
         logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
         return logits
 

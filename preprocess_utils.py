@@ -1,6 +1,7 @@
 import nltk.data
 from nltk.corpus import stopwords
 import json
+import itertools
 import re
 import numpy as np
 import collections
@@ -134,19 +135,125 @@ class Preprocessor:
             "i'll've": "i shall have",
             "i'm": "i am",
             "i've": "i have",
+            'wikiprojects':'wiki projects',
+            "god's":'gods',
+            "pneis":'penis',
+            "else's":'else his',
+            'pennnis':'penis',
+            'youfuck':'you fuck',
+            'phuq':'fuck',
+            'philippineslong':'philippines long',
+            "women's":'womens',
+            'wplol':'wikipedia lol',
+            "editor's":'editors',
+            'itsuck':'it suck',
+            "offfuck":'off fuck',
+            'tommytwo':'tommy two',
+            "file's":'files',
+            "other's":'others',
+            "gayfrozen":'gay frozen',
+            "mother's":'mothers',
+            "gayfag":'gay faggot',
+            "ip's":'ips',
+            "men's":'mens',
+            "today's":'todays',
+            "mothjer":'mother mispelled',
             "isn't": "is not",
             "it'd": "it had",
+            "anyone's":'anyones',
+            "website's":'websites',
+            "wiki's":'wikis',
+            "page's":'page is',
+            "aseven":'as even',
+            "wikipedia's":'wikipedias',
+            'npov':'neutral point of view',
+            "world's":'worlds',
+            "user's":'users',
+            "securityfuck": 'security fuck',
+            "one's":'ones',
+            'néger':'nigger',
+            "author's":'authors',
+            'roflspam':'rofl spam',
+            'niggors':'niggers',
+            'helloz':'hello',
+            'phck':'fuck',
+            'bonergasm':'boner orgasm',
+            'schäbig':'lame',
+            'bitchbot':'bitch robot',
+            'donkeysex':'donkey sex',
+            'faggt':'faggot',
+            'niggerjew':'nigger jew',
+            'dixz':'dicks',
+            'gayyour':'gay your',
+            'smileyo':'smile yo',
+            'backgrounhappy':'background happy',
+            'vaginapenis':'vagina penis',
+            'wphappy':'wp happy',
+            'smileyist':'smiley ist',
+            'radicalnigger':'radical nigger',
+            'oldihappy':'oldi happy',
+            'smileyx':'smiley x',
+            'peenus':'penis',
+            'motherfuckerdie':'motherfucker die',
+            'homopetersymonds':'homo peter symonds',
+            'honkhonk':'honk honk',
+            'analanal':'anal anal',
+            "sex'butt":"sex butt",
+            "here's":'here is',
+            "subject's":'subject is',
+            'fucksex':'fuck sex',
+            'smileyol':'smiley',
+            'yourselfgo':'yourself go',
+            "fggt":'faggot',
+            "person's":'persons',
+            "man's":"mans",
+            "article's":'articles',
             "it'd've": "it would have",
             "it'll": "it shall",
             "it'll've": "it shall have",
             "it's": "it has",
+            '#zero':'zero',
+            'pagedelete':'page delete',
+            'addressip':'address ip',
+            "image's":'images',
+            'imagehappy':'image happy',
+            'imagelol':'image lol',
+            'slimvirgin':'slim virgin',
             "let's": "let us",
             "ma'am": "madam",
+            'b00ll00x':'bull shit',
             "mayn't": "may not",
             "might've": "might have",
             "mightn't": "might not",
             "mightn't've": "might not have",
+            "people's":'peoples',
+            'cuntfranks':'cunt franks',
+            "3rr":'three revert rule',
+            '#f5fffa': 'mint green',
+            '`':' ',
+            'royce':'badass',
+            '@hotmail':'email adress',
+            'fvckers':'fuckers',
+            'suckernguyen':'sucker nguyen',
+            'turkeyfuck':'turkey fuck',
+            'wpneutral':'wp neutral',
+            'faggotgay':'faggot gay',
+            'cuntliz':'cunt liz',
+            'sucksgeorge':'sucks george',
+            'hornyhorny':'horny horny',
+            'headsdick':'heads dick',
+            'helloe':'hello',
+            'kfuckity':'fuck city',
+            'smileyi':'smiley',
+            'ballsballs':'balls balls',
+            'serbiafack':'serbia fuck',
             "must've": "must have",
+            'wikipedialol':'wikipedia lol',
+            'wikilove':'wiki love',
+            'penispenis':'penis penis',
+            'fagsgod':'fags god',
+            'nigggers':'niggers',
+            'bitchbitch':'bitch bitch',
             "mustn't": "must not",
             "mustn't've": "must not have",
             "needn't": "need not",
@@ -259,13 +366,17 @@ class Preprocessor:
 
     @staticmethod
     def rm_hyperlinks(words):
-        words = [w for w in words if not (w.startswith('http') or w.startswith('www') or w.endswith('.com'))]
+        words = [w if not (w.startswith('http') or
+                           w.startswith('www') or
+                           w.endswith('.com') or
+                            w.startswith('en.wikipedia.org/')) else 'url' for w in words]
         return words
+
 
     @staticmethod
     def rm_links_text(text):
-        text = re.sub("http?s://.* ","<URL>", text)
-        text = re.sub("www.* ", "<URL>", text)
+        text = re.sub("http?s://.* ","url", text)
+        text = re.sub("www.* ", "url", text)
         return text
 
     @staticmethod
@@ -292,28 +403,47 @@ class Preprocessor:
 
     @staticmethod
     def rm_user(text):
-        text = re.sub("\[\[User(.*)\|","<USER>", text)
+        text = re.sub("\[\[User(.*)\|","user-id", text)
         return text
 
     @staticmethod
-    def rm_ip(text):
-        text = re.sub("\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}","<IP>",text)
+    def replace_ip(text):
+        text = re.sub("\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}","ip-address",text)
         return text
 
     @staticmethod
     def rm_article_id(text):
-        text = re.sub("\d:\d\d\s{0,5}$","<article_id>" ,text)
+        text = re.sub("\d:\d\d\s{0,5}$","article-id" ,text)
         return text
 
     @staticmethod
     def rm_bigrams(text):
-        text = re.sub(r'[-–]',' ',text)
+        text = re.sub(r'[-–_]',' ',text)
+        return text
+
+    @staticmethod
+    def replace_smileys(text):
+        """
+        adapted from https://nlp.stanford.edu/projects/glove/preprocess-twitter.rb
+
+        """
+        eyes = "[8:=;]"
+        nose = "['`\-]?"
+        # Different regex parts for smiley faces
+        text = re.sub("<3", 'heart emoji', text)
+        text = re.sub(eyes + nose + "[Dd)\]]", 'happy smiley', text)
+        text = re.sub("[(d]" + nose + eyes, 'happy smiley', text)
+        text = re.sub(eyes + nose + "p", 'lol smiley', text)
+        text = re.sub(eyes + nose + "\(", 'sad smiley', text)
+        text = re.sub("\)" + nose + eyes, 'sad smiley', text)
+        text = re.sub(eyes + nose + "[/|l*]", 'neutral smiley', text)
+
         return text
 
     def rm_leaky_features(self,text):
         text = self.rm_links_text(text)
         text = self.rm_article_id(text)
-        text = self.rm_ip(text)
+        text = self.replace_ip(text)
         text = self.rm_user(text)
         text = self.rm_breaks(text)
         return text
@@ -561,7 +691,8 @@ def preprocess(data, add_polarity = False):
     data[COMMENT] = data[COMMENT].map(lambda x: p.lower(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_breaks(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.expand_contractions(x))
-    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_ip(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.replace_smileys(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.replace_ip(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_links_text(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.replace_numbers(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_bigrams(x))

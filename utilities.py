@@ -9,6 +9,7 @@ from six import string_types, iteritems
 import tqdm
 from thesaurus import Word
 from sklearn.metrics import log_loss
+from collections import Counter
 
 labels = ['identity_hate', 'insult', 'obscene', 'severe_toxic', 'threat', 'toxic']
 label2id = {name:id for id,name in enumerate(labels)}
@@ -178,12 +179,14 @@ def save_mini_fasttext_format(model, fname, words_dict, binary=False):
                     fout.write(utils.to_utf8("%s %s\n" % (word, ' '.join("%f" % val for val in row))))
 
 def coverage(tokenized_sentences, embedding_word_dict):
+    counter = Counter()
     k = 0
     l = 0
     for tokenized_sentence in tqdm.tqdm(tokenized_sentences):
         for token in tokenized_sentence:
             l += 1
             if token not in embedding_word_dict:
+                counter.update([token])
                 k += 1
     print('embeddings not found: {0:.1f}%'.format(k / l * 100))
 
