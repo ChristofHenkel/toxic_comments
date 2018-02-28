@@ -17,7 +17,7 @@ import pickle
 from utilities import loadGloveModel, coverage
 from sklearn.model_selection import train_test_split
 from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, COMMENT, LIST_CLASSES, VALID_SLIM_FILENAME, TRAIN_SLIM_FILENAME, TEST_FILENAME
-
+import time
 model_baseline = BIRNN().gru64_4
 
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
@@ -49,7 +49,7 @@ class Config:
     bsize = 512
     max_seq_len = 500
     epochs = 15
-    model_name = 'gru64_4_mix'
+    model_name = 'gru64_4_pseudo'
     root = ''
     fp = 'models/RNN/' + model_name + '/'
     logs_path = fp + 'logs/'
@@ -440,8 +440,8 @@ class Model:
 def train_folds(fold_count=10):
 
     #train_data = pd.read_csv("assets/raw_data/bagging_train.csv")
-    #train_data = pd.read_csv('train_e0.csv')
-    train_data = pd.read_csv(TRAIN_SLIM_FILENAME)
+    train_data = pd.read_csv('train_e0.csv')
+    #train_data = pd.read_csv(TRAIN_SLIM_FILENAME)
     # t, v = train_test_split(train_data,test_size=0.2, random_state=123)
     # t.to_csv("assets/raw_data/bagging_train.csv")
     # v.to_csv("assets/raw_data/bagging_valid.csv")
@@ -522,11 +522,12 @@ def train_folds(fold_count=10):
         Y_train = np.concatenate([Y[:fold_start], Y[fold_end:]])
 
 
-        X_train, Y_train = mixup( X_train, Y_train,0.5, 0.1, seed=43)
+        #X_train, Y_train = mixup( X_train, Y_train,0.5, 0.1, seed=43)
 
         m = Model(Config)
         m.set_graph(embedding_matrix)
         m.train(X_train, Y_train, X_valid, Y_valid, X_test, embedding_matrix, fold_id)
 
+
+time.sleep(60*60*4)
 train_folds(fold_count=10)
-quit()

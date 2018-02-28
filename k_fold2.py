@@ -20,7 +20,7 @@ VALID_DATA_FN = VALID_SLIM_FILENAME
 
 use_GPU = True
 root = 'models/RNN/'
-model = 'gru64a/'
+model = 'gru64_4_base/'
 model_fp = root + model
 logs = root + model + 'logs/'
 fn_words_dict = root + model + 'tc_words_dict.p'
@@ -67,7 +67,7 @@ def transform_data(data):
     #    data = preprocess(data)
     sentences = data["comment_text"].fillna("_NAN_").values
     # update word dict
-    tokenized_sentences, _ = tc.tokenize_sentences(sentences, words_dict)
+    [tokenized_sentences] = tc.tokenize_list_of_sentences([sentences])
     coverage(tokenized_sentences,embedding_word_dict)
     sequences = tc.tokenized_sentences2seq(tokenized_sentences, words_dict)
     list_of_token_ids = tc.convert_tokens_to_ids(sequences, embedding_word_dict)
@@ -135,7 +135,7 @@ def predict(epoch, X):
     #[print(n.name) for n in tf.get_default_graph().as_graph_def().node]
     for b in tqdm.tqdm(range(num_batches-1)):
         batch_x = X[b*cfg.bsize:(b+1)*cfg.bsize]
-        result = sess.run('fully_connected_2/Sigmoid:0', feed_dict={'x:0': batch_x,
+        result = sess.run('fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
                                                                     'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result)
@@ -146,7 +146,7 @@ def predict(epoch, X):
         batch_x = np.repeat(batch_x, b, axis=0)
         batch_x = batch_x[:cfg.bsize]
 
-        result = sess.run('fully_connected_2/Sigmoid:0', feed_dict={'x:0': batch_x,
+        result = sess.run('fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
                                                                     'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result[:bsize_last_batch])
