@@ -20,12 +20,13 @@ VALID_DATA_FN = VALID_SLIM_FILENAME
 
 use_GPU = True
 root = 'models/RNN/'
-model = 'gru64_4_base/'
+model = 'gru_BN_ATT_slim/'
 model_fp = root + model
 logs = root + model + 'logs/'
 fn_words_dict = root + model + 'tc_words_dict.p'
 fn_embedding_words_dict = root + model + 'embedding_word_dict.p'
 do_submission = True
+
 
 fn_train_out = 'l2_train_data.csv'
 fn_valid_out = "l2_valid_data.csv"
@@ -63,8 +64,7 @@ _get_score()
 
 
 def transform_data(data):
-    #if cfg.do_preprocess:
-    #    data = preprocess(data)
+
     sentences = data["comment_text"].fillna("_NAN_").values
     # update word dict
     [tokenized_sentences] = tc.tokenize_list_of_sentences([sentences])
@@ -88,30 +88,62 @@ valid_data = pd.read_csv(VALID_DATA_FN, index_col=1)
 train_data = pd.read_csv(TRAIN_DATA_FN)
 Y_train = train_data[LIST_CLASSES].values
 if cfg.do_preprocess:
-    print('preprocessing test')
-    test_data = preprocess(test_data)
-    print('preprocessing train')
-    train_data = preprocess(train_data)
-    print('preprocessing valid')
-    valid_data = preprocess(valid_data)
-
-    if cfg.level == 'word':
-        X_test = transform_data(test_data)
-        X_valid = transform_data(valid_data)
-        X_train = transform_data(train_data)
-    elif cfg.level == 'char':
-        train_data = pd.read_csv(TRAIN_DATA_FN)
-        preprocessor = Preprocessor(min_count_chars=10)
-
-        sentences_train = train_data["comment_text"].fillna("_NAN_").values
-        # sentences_train = [preprocessor.lower(text) for text in sentences_train]
-        preprocessor.create_char_vocabulary(sentences_train)
-        embedding_matrix = np.zeros((preprocessor.char_vocab_size, cfg.char_embedding_size))
-        sentences_test = test_data["comment_text"].fillna("_NAN_").values
-        X_test = preprocessor.char2seq(sentences_test, maxlen=2000)
-        embedding_matrix = np.zeros((preprocessor.char_vocab_size, cfg.char_embedding_size))
+    if cfg.add_polarity == 'True':
+        print('preprocessing test (w polarity)')
+        test_data = preprocess(test_data,add_polarity=True)
+        print('preprocessing train (w polarity)')
+        train_data = preprocess(train_data,add_polarity=True)
+        print('preprocessing valid (w polarity)')
+        valid_data = preprocess(valid_data,add_polarity=True)
     else:
-        print('wrong level')
+        print('preprocessing test')
+        test_data = preprocess(test_data)
+        print('preprocessing train')
+        train_data = preprocess(train_data)
+        print('preprocessing valid')
+        valid_data = preprocess(valid_data)
+
+
+if cfg.level == 'word':
+    #X_test = transform_data(test_data)
+    #X_valid = transform_data(valid_data)
+    #X_train = transform_data(train_data)
+    sentences_test = test_data["comment_text"].fillna("_NAN_").values
+    sentences_train = train_data["comment_text"].fillna("_NAN_").values
+    sentences_valid = valid_data["comment_text"].fillna("_NAN_").values
+    # update word dict
+    tokenized_sentences_train, tokenized_sentences_valid, tokenized_sentences_test = tc.tokenize_list_of_sentences(
+        [sentences_train, sentences_valid, sentences_test])
+
+    #tc.create_word2id([tokenized_sentences_train, tokenized_sentences_valid, tokenized_sentences_test])
+    coverage(tokenized_sentences_train,embedding_word_dict)
+    coverage(tokenized_sentences_valid, embedding_word_dict)
+    coverage(tokenized_sentences_test, embedding_word_dict)
+    sequences_train = tc.tokenized_sentences2seq(tokenized_sentences_train, words_dict)
+    sequences_test = tc.tokenized_sentences2seq(tokenized_sentences_test, words_dict)
+    sequences_valid = tc.tokenized_sentences2seq(tokenized_sentences_valid, words_dict)
+    X_train = np.array(tc.convert_tokens_to_ids(sequences_train, embedding_word_dict))
+    X_test = np.array(tc.convert_tokens_to_ids(sequences_test, embedding_word_dict))
+    X_valid = np.array(tc.convert_tokens_to_ids(sequences_valid, embedding_word_dict))
+
+
+
+
+
+
+elif cfg.level == 'char':
+    train_data = pd.read_csv(TRAIN_DATA_FN)
+    preprocessor = Preprocessor(min_count_chars=10)
+
+    sentences_train = train_data["comment_text"].fillna("_NAN_").values
+    # sentences_train = [preprocessor.lower(text) for text in sentences_train]
+    preprocessor.create_char_vocabulary(sentences_train)
+    embedding_matrix = np.zeros((preprocessor.char_vocab_size, cfg.char_embedding_size))
+    sentences_test = test_data["comment_text"].fillna("_NAN_").values
+    X_test = preprocessor.char2seq(sentences_test, maxlen=2000)
+    embedding_matrix = np.zeros((preprocessor.char_vocab_size, cfg.char_embedding_size))
+else:
+    print('wrong level')
 
 
 
@@ -135,7 +167,7 @@ def predict(epoch, X):
     #[print(n.name) for n in tf.get_default_graph().as_graph_def().node]
     for b in tqdm.tqdm(range(num_batches-1)):
         batch_x = X[b*cfg.bsize:(b+1)*cfg.bsize]
-        result = sess.run('fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
+        result = sess.run('fully_connected_3/Sigmoid:0', feed_dict={'x:0': batch_x,
                                                                     'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result)
@@ -146,7 +178,7 @@ def predict(epoch, X):
         batch_x = np.repeat(batch_x, b, axis=0)
         batch_x = batch_x[:cfg.bsize]
 
-        result = sess.run('fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
+        result = sess.run('fully_connected_3/Sigmoid:0', feed_dict={'x:0': batch_x,
                                                                     'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result[:bsize_last_batch])

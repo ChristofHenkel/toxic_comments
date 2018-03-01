@@ -729,7 +729,6 @@ class BIRNN:
         outputs = tf.concat([output_fw, output_bw], axis = 2)
 
         alphas = self._attention_mechanism(outputs, attention_layer_size=10, rnn_units=rnn_units, maxSeqLength=500)
-        # encodings is of shape (batch_size, 2 * self.lstm_size)
         encodings = tf.reduce_sum(alphas * outputs, 1)
         outputs = tf.transpose(outputs, [0, 2, 1])
 
@@ -796,12 +795,13 @@ class BIRNN:
         outputs = BatchNormalization()(x2)
 
 
+
         maxs = tf.reduce_max(outputs, axis=2)
         means = tf.reduce_mean(outputs, axis=2)
         last = outputs[:, :, -1]
         x3 = tf.concat([maxs, means, last], axis=1)
 
-        #x3 = layers.fully_connected(outputs, 32, activation_fn=tf.nn.relu)
+        #x3 = layers.fully_connected(outputs, 128, activation_fn=tf.nn.relu)
         logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
@@ -1142,7 +1142,194 @@ class BIRNN:
         logits = layers.fully_connected(outputs_with_cnn, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
+    @staticmethod
+    def gru_BN_1(embedding_matrix, x, keep_prob):
 
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(embedded_input)
+        x2 = tf.transpose(x2, [0, 2, 1])
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = BatchNormalization()(x2)
+
+
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last], axis=1)
+
+        x3 = layers.fully_connected(x3, 128, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
+    def gru_BN_1b(embedding_matrix, x, keep_prob):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(embedded_input)
+
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = BatchNormalization()(x2)
+
+        outputs = tf.transpose(outputs, [0, 2, 1])
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last], axis=1)
+
+        x3 = layers.fully_connected(x3, 128, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    def gru_BN_ATT(self,embedding_matrix, x, keep_prob):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(embedded_input)
+
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = BatchNormalization()(x2)
+
+
+        alphas = self._attention_mechanism(outputs, attention_layer_size=10, rnn_units=64, maxSeqLength=300)
+        encodings = tf.reduce_sum(alphas * outputs, 1)
+        outputs = tf.transpose(outputs, [0, 2, 1])
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last,encodings], axis=1)
+
+        x3 = layers.fully_connected(x3, 128, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    def gru_BN_ATT_2(self,embedding_matrix, x, keep_prob):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        x2 = Bidirectional(CuDNNGRU(128, return_sequences=True))(embedded_input)
+
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = BatchNormalization()(x2)
+
+
+        alphas = self._attention_mechanism(outputs, attention_layer_size=10, rnn_units=128, maxSeqLength=300)
+        encodings = tf.reduce_sum(alphas * outputs, 1)
+        outputs = tf.transpose(outputs, [0, 2, 1])
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last,encodings], axis=1)
+
+        x3 = layers.fully_connected(x3, 128, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    def gru_BN_ATT_3(self,embedding_matrix, x, keep_prob):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(embedded_input)
+
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = BatchNormalization()(x2)
+
+
+        alphas = self._attention_mechanism(outputs, attention_layer_size=10, rnn_units=64, maxSeqLength=300)
+        encodings = tf.reduce_sum(alphas * outputs, 1)
+        outputs = tf.transpose(outputs, [0, 2, 1])
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last,encodings], axis=1)
+
+        x3 = layers.fully_connected(x3, 256, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    def gru_BN_ATT_4(self,embedding_matrix, x, keep_prob, cfg):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        x2 = Bidirectional(CuDNNGRU(cfg.rnn_units, return_sequences=True))(embedded_input)
+
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = BatchNormalization()(x2)
+
+
+        alphas = self._attention_mechanism(outputs, attention_layer_size=10, rnn_units=cfg.rnn_units, maxSeqLength=cfg.max_seq_len)
+        encodings = tf.reduce_sum(alphas * outputs, 1)
+        outputs = tf.transpose(outputs, [0, 2, 1])
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last,encodings], axis=1)
+
+        x3 = layers.fully_connected(x3, cfg.fc_units[0], activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    def gru_ATT(self,embedding_matrix, x, keep_prob, cfg):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        x2 = Bidirectional(CuDNNGRU(cfg.rnn_units, return_sequences=True))(embedded_input)
+
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = x2
+
+
+        alphas = self._attention_mechanism(outputs, attention_layer_size=cfg.att_size, rnn_units=cfg.rnn_units, maxSeqLength=cfg.max_seq_len)
+        encodings = tf.reduce_sum(alphas * outputs, 1)
+        outputs = tf.transpose(outputs, [0, 2, 1])
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last,encodings], axis=1)
+
+        x3 = layers.fully_connected(x3, cfg.fc_units[0], activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
+    def gru_BN_2(embedding_matrix, x, keep_prob):
+
+        with tf.name_scope("Embedding"):
+            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(embedded_input)
+        x2 = tf.transpose(x2, [0, 2, 1])
+        x2 = tf.nn.dropout(x2,keep_prob=keep_prob)
+        outputs = BatchNormalization()(x2)
+
+
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        last = outputs[:, :, -1]
+        x3 = tf.concat([maxs, means, last], axis=1)
+        x3 = layers.fully_connected(x3, 128, activation_fn=tf.nn.relu)
+        x3 = layers.fully_connected(x3, 128, activation_fn=tf.nn.relu)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
 class CCAPS:
 
     def __init__(self):
@@ -1785,8 +1972,27 @@ class DENSE:
             #embedded_input = tf.cast(embedded_input, tf.float32)
 
         h1 = layers.fully_connected(embedded_input, 512, activation_fn=tf.nn.relu)
+        h1 = layers.conv2d(embedded_input,512,1,1,activation_fn=tf.nn.relu)
         h2 = layers.fully_connected(h1, 512, activation_fn=tf.nn.relu)
         h3 = layers.fully_connected(h2, 512, activation_fn=tf.nn.relu)
+        h_flat = tf.layers.flatten(h3)
+        h_flat = tf.nn.dropout(h_flat, keep_prob=keep_prob)
+
+        logits = layers.fully_connected(h_flat, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    @staticmethod
+    def rectangle_512x3_2(embedding_matrix,x,keep_prob):
+        with tf.name_scope("Embedding"):
+            # embedding = tf.get_variable("embedding", tf.shape(embedding_matrix), dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+
+            #embedded_input = SpatialDropout1D(0.2)(embedded_input)
+            #embedded_input = tf.cast(embedded_input, tf.float32)
+
+        h1 = layers.conv2d(embedded_input,512,1,1,activation_fn=tf.nn.relu)
+        h2 = layers.conv2d(h1, 512, 1, 1, activation_fn=tf.nn.relu)
+        h3 = layers.conv2d(h2, 512, 1, 1, activation_fn=tf.nn.relu)
         h_flat = tf.layers.flatten(h3)
         h_flat = tf.nn.dropout(h_flat, keep_prob=keep_prob)
 

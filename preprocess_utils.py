@@ -135,7 +135,26 @@ class Preprocessor:
             "i'll've": "i shall have",
             "i'm": "i am",
             "i've": "i have",
+            'marcolfuck':'marcol fuck',
             'wikiprojects':'wiki projects',
+            'youbollocks':'you bull shit',
+            'ancestryfuck':'ancestry fuck',
+            'ricehappy':'rice happy',
+            'aidsaids':'aids aids',
+            'smileyrick':'smiley rick',
+            'wikipediahappy':'wikipedia happy',
+            'talkhappy':'talk happy',
+            'talklol':'talk lol',
+            'userhappy':'user happy',
+            'mainpagebg':'mainpage background',
+            '@ggot':'faggot',
+            'smileyrecious':'smiley recious',
+            'nooob':'noob',
+            'urlsmiley':'url smiley',
+            'ashol':'asshole',
+            'smileyp':'smiley',
+            'latinus':'latino',
+            'userlol':'user lol',
             "god's":'gods',
             "pneis":'penis',
             "else's":'else his',
@@ -231,7 +250,7 @@ class Preprocessor:
             "3rr":'three revert rule',
             '#f5fffa': 'mint green',
             '`':' ',
-            'royce':'badass',
+            'roycy':'badass',
             '@hotmail':'email adress',
             'fvckers':'fuckers',
             'suckernguyen':'sucker nguyen',
@@ -239,6 +258,7 @@ class Preprocessor:
             'wpneutral':'wp neutral',
             'faggotgay':'faggot gay',
             'cuntliz':'cunt liz',
+            'smileylease':'smiley lease',
             'sucksgeorge':'sucks george',
             'hornyhorny':'horny horny',
             'headsdick':'heads dick',
@@ -338,6 +358,9 @@ class Preprocessor:
 
         return self.contractions_re.sub(replace, text)
 
+    @staticmethod
+    def strip_spaces(words):
+        return [w.replace(' ', '') for w in words]
 
     def replace_badwords_with_syn(self,text):
         for word in self.bad_words_synonyms:
@@ -419,6 +442,11 @@ class Preprocessor:
     @staticmethod
     def rm_bigrams(text):
         text = re.sub(r'[-–_]',' ',text)
+        return text
+
+    @staticmethod
+    def isolate_punc(text):
+        text = re.sub(r'([\'\"\.\(\)\!\?\-\\\/\,])', r' \1 ', text)
         return text
 
     @staticmethod
@@ -696,6 +724,7 @@ def preprocess(data, add_polarity = False):
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_links_text(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.replace_numbers(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_bigrams(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.isolate_punc(x))
 
     if add_polarity:
         print('adding polarity')
