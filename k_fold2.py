@@ -8,19 +8,19 @@ import os
 from utilities import coverage, load_config
 from preprocess_utils import Preprocessor, preprocess
 from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, LIST_CLASSES, LIST_LOGITS, COMMENT, \
-    VALID_SLIM_FILENAME, TRAIN_SLIM_FILENAME, TEST_FILENAME, SAMPLE_SUBMISSION_FILENAME
+    VALID_SLIM_FILENAME, TRAIN_SLIM_FILENAME, TEST_FILENAME, SAMPLE_SUBMISSION_FILENAME, TRAIN_FILENAME
 
 
 LEVEL = 'word'
 
 
-TRAIN_DATA_FN = TRAIN_SLIM_FILENAME
+TRAIN_DATA_FN = TRAIN_FILENAME
 TEST_DATA_FN = TEST_FILENAME
 VALID_DATA_FN = VALID_SLIM_FILENAME
 
 use_GPU = True
 root = 'models/RNN/'
-model = 'gru_BN_ATT_slim/'
+model = 'gru_ATT_3/'
 model_fp = root + model
 logs = root + model + 'logs/'
 fn_words_dict = root + model + 'tc_words_dict.p'
@@ -39,6 +39,8 @@ class Config:
 cfg = Config()
 load_config(cfg, model_fp)
 
+# should be removed
+cfg.level = 'word'
 
 tc = ToxicComments(cfg)
 epochs = [fn.split('.ckpt')[0] for fn in os.listdir(logs) if fn.endswith('.meta')]
@@ -168,7 +170,7 @@ def predict(epoch, X):
     for b in tqdm.tqdm(range(num_batches-1)):
         batch_x = X[b*cfg.bsize:(b+1)*cfg.bsize]
         result = sess.run('fully_connected_3/Sigmoid:0', feed_dict={'x:0': batch_x,
-                                                                    'em:0':embedding_matrix,
+                                                                    #'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result)
 
@@ -179,7 +181,7 @@ def predict(epoch, X):
         batch_x = batch_x[:cfg.bsize]
 
         result = sess.run('fully_connected_3/Sigmoid:0', feed_dict={'x:0': batch_x,
-                                                                    'em:0':embedding_matrix,
+                                                                    #'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result[:bsize_last_batch])
     sess.close()

@@ -13,13 +13,15 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from catboost import CatBoostRegressor,CatBoostClassifier
 from sklearn.model_selection import KFold
+import lightgbm as lgb
 import xgboost as xgb
 from xgboost import XGBRegressor
 import scipy
 from utilities import corr_matrix, logloss
 from global_variables import LIST_LOGITS, LIST_CLASSES
 
-classifiers = ['xgb','lr','nn'] #nn, catboost
+classifiers = ['xgb','lr','nn','lgb'] #nn, catboost
+#classifiers = ['lgb'] #nn, catboost
 do_prediction = False
 fn_out = 'models/ENSAMBLES/e3/'
 # Todo add switch for per class or all logits
@@ -68,8 +70,15 @@ def get_values(csv_files, columns, hstack = False, with_labels=True):
     else:
         return X
 
-X_train, Y_train = get_values(csvs_train,columns=LIST_LOGITS,hstack=False,with_labels=True)
-X_valid, Y_valid = get_values(csvs_valid,columns=LIST_LOGITS,hstack=False,with_labels=True)
+X, Y = get_values(csvs_train,columns=LIST_LOGITS,hstack=False,with_labels=True)
+split = len(X)//10
+
+X_train = X[split:]
+X_valid = X[:split]
+Y_train = Y[split:]
+Y_valid = Y[:split]
+
+#X_valid, Y_valid = get_values(csvs_valid,columns=LIST_LOGITS,hstack=False,with_labels=True)
 X_test = get_values(csvs_train,columns=LIST_CLASSES,hstack=False,with_labels=False)
 
 
@@ -86,6 +95,48 @@ if 'xgb' in classifiers:
                            min_child_weight=3)
         clf.fit(X_train[:, :, i], Y_train[:, i])
         xgb_clfs.append(clf)
+
+if 'lgb' in classifiers:
+
+
+    split = len(X_train)//10
+    X_train_lgb = X_train[split:]
+    X_valid_lgb = X_train[:split]
+    Y_train_lgb = Y_train[split:]
+    Y_valid_lgb = Y_train[:split]
+
+
+
+    lgb_clfs = []
+    for i in range(6):
+        print('fitting lgb on %s' % LIST_CLASSES[i])
+        lgb_train = lgb.Dataset(X_train_lgb[:, :, i], Y_train_lgb[:, i])
+        lgb_eval = lgb.Dataset(X_valid_lgb[:, :, i], Y_valid_lgb[:, i], reference=lgb_train)
+
+        params = {'task': 'train',
+                  'boosting_type': 'gbdt',
+                  'objective': 'regression',
+                  'metric': {'l2', 'auc'},
+                  #'num_leaves': 31,
+                  'num_leaves': 20,
+                  #'learning_rate': 0.05,
+                  'learning_rate': 0.1,
+                  'feature_fraction': 0.9,
+                  'bagging_fraction': 0.8,
+                  'bagging_freq': 5,
+                  'verbose': 1,
+                  }
+
+        gbm = lgb.train(params,lgb_train,num_boost_round=20,valid_sets=lgb_eval,early_stopping_rounds=5)
+        lgb_clfs.append(gbm)
+
+    #preds_lgb = np.zeros((len(X_valid), 6))
+    #for i in range(6):
+    #    preds_lgb[:, i] = lgb_clfs[i].predict(X_valid[:, :, i], num_iteration=lgb_clfs[i].best_iteration)
+    #print('using lgb %s' % roc_auc_score(Y_valid, preds_lgb))
+    #print('using lgb %s' %logloss(Y_valid,preds_lgb))
+    #print(lr)
+    #time.sleep(3)
 
 
 if 'lr' in classifiers:
@@ -107,12 +158,19 @@ if 'nn' in classifiers:
 
 preds_cat = np.zeros((len(X_valid), 6))
 preds_xgb = np.zeros((len(X_valid), 6))
+preds_lgb = np.zeros((len(X_valid), 6))
 preds_logistic = np.zeros((len(X_valid), 6))
+preds_nn = np.zeros((len(X_valid), 6))
 
 for i in range(6):
-    preds_xgb[:, i] = xgb_clfs[i].predict(X_valid[:, :, i])
-    preds_logistic[:, i] = lr_clfs[i].predict_proba(X_valid[:, :, i])[:, 1]
-preds_nn = clf_nn.predict_proba(X_valid.reshape((-1, len(csvs_train) * len(LIST_CLASSES))))
+    if 'xgb' in classifiers:
+        preds_xgb[:, i] = xgb_clfs[i].predict(X_valid[:, :, i])
+    if 'lr' in classifiers:
+        preds_logistic[:, i] = lr_clfs[i].predict_proba(X_valid[:, :, i])[:, 1]
+    if 'lgb' in classifiers:
+        preds_lgb[:, i] = lgb_clfs[i].predict(X_valid[:, :, i], num_iteration=lgb_clfs[i].best_iteration)
+if 'nn' in classifiers:
+    preds_nn = clf_nn.predict_proba(X_valid.reshape((-1, len(csvs_train) * len(LIST_CLASSES))))
 
 
 if do_prediction:
@@ -172,19 +230,22 @@ print('----------ROC AUC------------')
 print('using mean %s' %roc_auc_score(Y_valid,np.mean(X_valid,axis=1)))
 #print('using catboost %s' %roc_auc_score(Y_valid,preds_cat))
 print('using xgb %s' %roc_auc_score(Y_valid,preds_xgb))
+print('using lgb %s' %roc_auc_score(Y_valid,preds_lgb))
 print('using lr %s' %roc_auc_score(Y_valid,preds_logistic))
 print('using nn %s' %roc_auc_score(Y_valid,preds_nn))
 print('using xgb + lr %s' %roc_auc_score(Y_valid,np.mean([preds_logistic,preds_xgb],axis= 0)))
 print('using xgb + lr + nn %s' %roc_auc_score(Y_valid,np.mean([preds_logistic,preds_xgb, preds_nn],axis= 0)))
+print('using xgb + lr + nn + lgb %s' %roc_auc_score(Y_valid,np.mean([preds_logistic,preds_xgb, preds_nn, preds_lgb],axis= 0)))
 print('----------logloss------------')
 print('using mean %s' %logloss(Y_valid,np.mean(X_valid,axis=1)))
 #print('using catboost %s' %logloss(Y_valid,preds_cat))
 print('using xgb %s' %logloss(Y_valid,preds_xgb))
+print('using lgb %s' %logloss(Y_valid,preds_lgb))
 print('using lr %s' %logloss(Y_valid,preds_logistic))
 print('using nn %s' %logloss(Y_valid,preds_nn))
 print('using xgb + lr %s' %logloss(Y_valid,np.mean([preds_logistic,preds_xgb],axis= 0)))
 print('using xgb + lr + nn %s' %logloss(Y_valid,np.mean([preds_logistic,preds_xgb, preds_nn],axis= 0)))
-
+print('using xgb + lr + nn + lgb %s' %logloss(Y_valid,np.mean([preds_logistic,preds_xgb, preds_nn, preds_lgb],axis= 0)))
 
 
 
