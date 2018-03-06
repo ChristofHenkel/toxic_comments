@@ -16,7 +16,7 @@ class Config:
 
     do_preprocess = False
     root = 'models/NBSVM/'
-    model_name = 'char_model2/'
+    model_name = 'word_model1/'
     fp = root + model_name
     fn_out_train = 'l2_train_data.csv'
     fp_out_train = fp + fn_out_train
@@ -24,7 +24,7 @@ class Config:
     fp_out_test = fp + fn_out_test
     train_fn = TRAIN_FILENAME
     fold_count = 10
-    levels = ['char']
+    levels = ['word']
     tokenizer = TweetTokenizer()
     w_ngram_range = (1, 2)
     w_tokenizer = tokenizer.tokenize
@@ -39,8 +39,8 @@ class Config:
     c_lowercase = False
     c_strip_accents = 'unicode'
     c_analyzer = 'char'
-    c_ngram_range = (5, 6)
-    c_max_features = 50000
+    c_ngram_range = (1, 4)
+    c_max_features = 30000
 
 cfg = Config()
 write_config(Config)
@@ -49,7 +49,7 @@ write_config(Config)
 if not os.path.exists(cfg.root + cfg.model_name):
     os.mkdir(cfg.root + cfg.model_name)
 
-train = pd.read_csv(cfg.train_fn, index_col=0)
+train = pd.read_csv(cfg.train_fn)
 test = pd.read_csv(TEST_FILENAME, index_col=0)
 subm = pd.read_csv(SAMPLE_SUBMISSION_FILENAME)
 
@@ -76,9 +76,9 @@ Y = train[LIST_CLASSES]
 preds_test_list = []
 preds_valid_list = []
 list_of_y = []
-#preds_valid = np.zeros((len(train), len(LIST_CLASSES)))
+preds_valid = np.zeros((len(train), len(LIST_CLASSES)))
 res_y = np.zeros((len(train), len(LIST_CLASSES)))
-kf = KFold(n_splits=10)
+kf = KFold(n_splits=3)
 for train_index, valid_index in kf.split(X):
     #a = kf.split(X)
     #train_index, valid_index = a.__next__()
@@ -86,10 +86,8 @@ for train_index, valid_index in kf.split(X):
     preds_valid_fold_list = []
 
     X_train, X_valid = X[train_index], X[valid_index]
-    Y_train, Y_valid = Y.iloc[train_index], Y.iloc[valid_index]
-    #store ids
-    list_of_y.append(Y_valid)
-    Y_train, Y_valid = Y_train.values, Y_valid.values
+    Y_train, Y_valid = Y.loc[train_index].values, Y.loc[valid_index].values
+
     #reinitialize Vectorizer
 
     if 'word' in cfg.levels:
@@ -157,27 +155,22 @@ for train_index, valid_index in kf.split(X):
 
     preds_test_list.append(np.array(preds_test_fold_list).T)
     preds_valid_list.append(np.array(preds_valid_fold_list).T)
-
+    list_of_y.append(Y_valid)
 
     print('logloss: %s'%logloss(Y_valid,np.array(preds_valid_fold_list).T))
     print('ROC: %s' % roc_auc_score(Y_valid,np.array(preds_valid_fold_list).T))
 
-l2_data = pd.DataFrame(columns=['id'] + LIST_LOGITS+LIST_CLASSES)
-l2_data['id']= pd.Series(np.concatenate([list_of_y[fold].index.values for fold in range(cfg.fold_count)]))
+l2_data = pd.DataFrame(columns=LIST_LOGITS+LIST_CLASSES)
 l2_data[LIST_LOGITS] = pd.DataFrame(np.concatenate(preds_valid_list, axis = 0))
 l2_data[LIST_CLASSES] = pd.DataFrame(np.concatenate(list_of_y, axis = 0))
-l2_data.set_index('id', inplace=True)
-#control if df is correct
-print('logloss: %s' % logloss(l2_data[LIST_CLASSES].values, l2_data[LIST_LOGITS].values))
-print('ROC: %s' % roc_auc_score(l2_data[LIST_CLASSES].values, l2_data[LIST_LOGITS].values))
 l2_data.to_csv(cfg.fp_out_train)
 
-
-test_predicts = np.ones(preds_test_list[0].shape)
-for fold_predict in preds_test_list:
+preds_test_list2 = [np.array(preds_test_list[i:i+6]).T for i in range(10)]
+test_predicts = np.ones(preds_test_list2[0].shape)
+for fold_predict in preds_test_list2:
     test_predicts *= fold_predict
 
-test_predicts **= (1. / len(preds_test_list))
+test_predicts **= (1. / len(preds_test_list2))
 new_submission = pd.read_csv(SAMPLE_SUBMISSION_FILENAME)
 new_submission[LIST_CLASSES] = test_predicts
 new_submission.to_csv(cfg.fp_out_test, index=False)

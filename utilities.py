@@ -209,8 +209,14 @@ def write_syns():
     word_syns = get_synonyms(vocab)
 
 
-def write_config(fp,Config):
-    pass
+def write_config(Config):
+    with open(os.path.join(Config().fp, 'config.txt'), 'w') as f:
+        #f.write('Baseline = {}\n'.format(model_baseline.__name__))
+        f.write('\n')
+        f.write('Config\n')
+        class_list = [[item, Config.__dict__[item]] for item in sorted(Config.__dict__) if not item.startswith('__')]
+        for line in class_list:
+            f.write('{} = {}\n'.format(line[0], line[1]))
 
 def save_runs():
     pass

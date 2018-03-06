@@ -7,6 +7,32 @@ from keras.layers import CuDNNGRU, Dropout, Bidirectional, BatchNormalization, S
 class CNN:
 
     @staticmethod
+    def spatial_dropout(x, keep_prob, seed=1234):
+        # x is a convnet activation with shape BxWxHxF where F is the
+        # number of feature maps for that layer
+        # keep_prob is the proportion of feature maps we want to keep
+
+        # get the batch size and number of feature maps
+        num_feature_maps = [tf.shape(x)[0], tf.shape(x)[2]]
+
+        # get some uniform noise between keep_prob and 1 + keep_prob
+        random_tensor = keep_prob
+        random_tensor += tf.random_uniform(num_feature_maps,
+                                           seed=seed,
+                                           dtype=x.dtype)
+
+        # if we take the floor of this, we get a binary matrix where
+        # (1-keep_prob)% of the values are 0 and the rest are 1
+        binary_tensor = tf.floor(random_tensor)
+
+        # Reshape to multiply our feature maps by this tensor correctly
+        binary_tensor = tf.reshape(binary_tensor,
+                                   [-1, 1, tf.shape(x)[2]])
+        # Zero out feature maps where appropriate; scale up to compensate
+        ret = tf.div(x, keep_prob) * binary_tensor
+        return ret
+
+    @staticmethod
     def text_cnn(embedding_matrix,x,keep_prob):
         """
         https://github.com/dennybritz/cnn-text-classification-tf/blob/master/text_cnn.py
@@ -210,6 +236,127 @@ class CNN:
         logits = tf.contrib.layers.fully_connected(h_pool_flat, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
+
+    def inception_5(self,embedding_matrix,x,keep_prob,cfg):
+        """
+        https://arxiv.org/pdf/1512.00567.pdf
+
+        :return:
+        """
+
+        with tf.name_scope("Embedding"):
+            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+
+            embedded_input = self.spatial_dropout(embedded_input,keep_prob)
+            # embedded_input = tf.transpose(embedded_input, [0, 2, 1])
+            #embedded_input = tf.cast(embedded_input, tf.float32)
+        outputs = []
+
+        x1 = tf.layers.conv1d(embedded_input, filters=cfg.num_filters, kernel_size=1, strides=1, activation=tf.nn.relu)
+        x1 = tf.layers.max_pooling1d(x1, pool_size=cfg.max_seq_len - 1, strides=1)
+        outputs.append(x1)
+
+        x2 = tf.layers.conv1d(embedded_input, filters=cfg.num_filters, kernel_size=1, strides=1, activation=tf.nn.relu)
+        x2 = tf.layers.conv1d(x2, filters=cfg.num_filters, kernel_size=3, strides=1, activation=tf.nn.relu)
+        x2 = tf.layers.max_pooling1d(x2, pool_size=cfg.max_seq_len - 3, strides=1)
+
+        outputs.append(x2)
+
+        x3 = tf.layers.conv1d(embedded_input, filters=cfg.num_filters, kernel_size=1, strides=1, activation=tf.nn.relu)
+        x3 = tf.layers.conv1d(x3, filters=cfg.num_filters, kernel_size=3, strides=1, activation=tf.nn.relu)
+        x3 = tf.layers.conv1d(x3, filters=cfg.num_filters, kernel_size=3, strides=1, activation=tf.nn.relu)
+        x3 = tf.layers.max_pooling1d(x3, pool_size=cfg.max_seq_len - 5, strides=1)
+
+        outputs.append(x3)
+
+        h_pool = tf.concat(outputs, axis = 2)
+
+
+        h_pool_flat = tf.layers.flatten(h_pool)
+        for l in cfg.fc_units:
+            h_pool_flat = tf.contrib.layers.fully_connected(h_pool_flat,l)
+        h_pool_flat = tf.nn.dropout(h_pool_flat, keep_prob=keep_prob)
+
+        logits = tf.contrib.layers.fully_connected(h_pool_flat, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    def inception_5b(self,embedding_matrix,x,keep_prob,cfg):
+        """
+        https://arxiv.org/pdf/1512.00567.pdf
+
+        :return:
+        """
+
+        with tf.name_scope("Embedding"):
+            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+
+            embedded_input = self.spatial_dropout(embedded_input,keep_prob)
+            # embedded_input = tf.transpose(embedded_input, [0, 2, 1])
+            #embedded_input = tf.cast(embedded_input, tf.float32)
+        outputs = []
+
+        x1 = tf.layers.conv1d(embedded_input, filters=cfg.num_filters, kernel_size=1, strides=1, activation=tf.nn.relu)
+        x1 = tf.layers.max_pooling1d(x1, pool_size=cfg.max_seq_len - 1, strides=1)
+        outputs.append(x1)
+
+        x2 = tf.layers.conv1d(embedded_input, filters=cfg.num_filters, kernel_size=1, strides=1, activation=tf.nn.relu)
+        x2 = tf.layers.conv1d(x2, filters=cfg.num_filters, kernel_size=3, strides=1, activation=tf.nn.relu)
+        x2 = tf.layers.max_pooling1d(x2, pool_size=cfg.max_seq_len - 3, strides=1)
+
+        outputs.append(x2)
+
+        x3 = tf.layers.conv1d(embedded_input, filters=cfg.num_filters, kernel_size=1, strides=1, activation=tf.nn.relu)
+        x3 = tf.layers.conv1d(x3, filters=cfg.num_filters, kernel_size=3, strides=1, activation=tf.nn.relu)
+        x3 = tf.layers.conv1d(x3, filters=cfg.num_filters, kernel_size=3, strides=2, activation=tf.nn.relu)
+        x3 = tf.layers.max_pooling1d(x3, pool_size=150 - 3, strides=1)
+
+        outputs.append(x3)
+
+        h_pool = tf.concat(outputs, axis = 2)
+
+
+        h_pool_flat = tf.layers.flatten(h_pool)
+        for l in cfg.fc_units:
+            h_pool_flat = tf.contrib.layers.fully_connected(h_pool_flat,l)
+        h_pool_flat = tf.nn.dropout(h_pool_flat, keep_prob=keep_prob)
+
+        logits = tf.contrib.layers.fully_connected(h_pool_flat, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    def inception_6(self,embedding_matrix,x,keep_prob,cfg):
+        """
+        https://arxiv.org/pdf/1512.00567.pdf
+
+        :return:
+        """
+
+        with tf.name_scope("Embedding"):
+            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+
+            embedded_input = self.spatial_dropout(embedded_input,keep_prob)
+            # embedded_input = tf.transpose(embedded_input, [0, 2, 1])
+            #embedded_input = tf.cast(embedded_input, tf.float32)
+        outputs = []
+
+        for i in [3,4,5]:
+            x2 = tf.layers.conv1d(embedded_input, filters=cfg.num_filters, kernel_size=i, strides=1,activation=self.prelu)
+            x2 = tf.layers.max_pooling1d(x2, pool_size=cfg.max_seq_len-i, strides=1)
+            outputs.append(x2)
+
+        h_pool = tf.concat(outputs, axis = 2)
+
+
+        h_pool_flat = tf.layers.flatten(h_pool)
+        for l in cfg.fc_units:
+            h_pool_flat = tf.contrib.layers.fully_connected(h_pool_flat,l)
+        h_pool_flat = tf.nn.dropout(h_pool_flat, keep_prob=keep_prob)
+
+        logits = tf.contrib.layers.fully_connected(h_pool_flat, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
     @staticmethod
     def vgg_4(embedding_matrix,x,keep_prob):
 
@@ -228,6 +375,26 @@ class CNN:
         conv_output = tf.reduce_max(x2, axis=1)
         fc1 = tf.contrib.layers.fully_connected(conv_output, 64)
         logits = tf.contrib.layers.fully_connected(fc1, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+
+    def vgg2(self,embedding_matrix,x,keep_prob,cfg):
+
+        with tf.name_scope("Embedding"):
+            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+            x2 = self.spatial_dropout(embedded_input,keep_prob)
+
+        for i in range(3, 3 + cfg.vgg_depth):
+            x2 = tf.layers.conv1d(x2, filters=2 ** i, kernel_size=2, strides=1)
+            x2 = tf.layers.conv1d(x2, filters=2 ** i, kernel_size=2, strides=1)
+            x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
+
+        conv_output = tf.reduce_max(x2, axis=1)
+        for l in cfg.fc_units:
+            conv_output = tf.contrib.layers.fully_connected(conv_output, l)
+        conv_output = tf.nn.dropout(conv_output, keep_prob=keep_prob)
+        logits = tf.contrib.layers.fully_connected(conv_output, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
     @staticmethod
@@ -290,12 +457,12 @@ class CNN:
         logits = tf.contrib.layers.fully_connected(conv_output, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
-    def vgg_5_dilations(self,embedding_matrix,x,keep_prob):
+    def vgg_5_dilations(self,embedding_matrix,x,keep_prob, cfg):
         depth = 5
         #dilation_rates = [0, 2, 4, 8, 16]
         with tf.name_scope("Embedding"):
-            #embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
-            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
             x2 = embedded_input
 
         for i in range(3, 3 + depth):
@@ -310,6 +477,29 @@ class CNN:
         logits = tf.contrib.layers.fully_connected(conv_output, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
+    def vgg_5_dilations2(self,embedding_matrix,x,keep_prob, cfg):
+        depth = 5
+        #dilation_rates = [0, 2, 4, 8, 16]
+        with tf.name_scope("Embedding"):
+            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+            x2 = self.spatial_dropout(embedded_input,keep_prob)
+
+        for i in range(3, 3 + depth):
+            x2 = tf.layers.conv1d(x2, filters=2 ** (i+2), kernel_size=3, strides=1,dilation_rate=2**(i-3),activation=tf.nn.relu)
+            x2 = tf.layers.conv1d(x2, filters=2 ** (i+2), kernel_size=3, strides=1,dilation_rate=2**(i-3),activation=tf.nn.relu)
+            #x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
+
+        conv_output = tf.reduce_max(x2, axis=1)
+        means = tf.reduce_mean(x2, axis=1)
+        conv_output = tf.concat([conv_output,means], axis=1)
+
+        for l in cfg.fc_units:
+            conv_output = tf.contrib.layers.fully_connected(conv_output, l, activation_fn=tf.nn.relu)
+
+        conv_output = layers.dropout(conv_output,keep_prob)
+        logits = tf.contrib.layers.fully_connected(conv_output, 6, activation_fn=tf.nn.sigmoid)
+        return logits
 
 
     @staticmethod

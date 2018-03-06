@@ -32,11 +32,15 @@ fn_out = 'models/ENSAMBLES/e3/'
 #              'models/RNN/pavel_all_outs_slim/birnn_all_outs_slim_baggin_logits_folded.csv'
 #              ]
 
-csvs_train = ['models/CNN/inception2_slim/l2_train_data.csv',
-              'models/NBSVM/slim/l2_train_data.csv',
-              #'models/RNN/pavel_attention_slim2/baggin_logits_folded.csv',
-              'models/RNN/pavel_all_outs_slim/l2_train_data.csv',
-              'models/CAPS/cudrnn_caps_slim/l2_train_data.csv']
+#csvs_train = ['models/CNN/inception2_slim/l2_train_data.csv',
+#              'models/NBSVM/slim/l2_train_data.csv',
+#              #'models/RNN/pavel_attention_slim2/baggin_logits_folded.csv',
+#              'models/RNN/pavel_all_outs_slim/l2_train_data.csv',
+#              'models/CAPS/cudrnn_caps_slim/l2_train_data.csv']
+
+csvs_train = ['models/NBSVM/word_model1/l2_train_data.csv',
+              'models/NBSVM/char_model1/l2_train_data.csv']
+
 csvs_valid = ['models/CNN/inception2_slim/inception2_slim_baggin_logits_folded.csv',
               'models/NBSVM/slim/nbsvm_prediction_valid.csv',
               #'models/RNN/pavel_attention_slim2/baggin_logits_folded.csv',
@@ -48,6 +52,8 @@ csvs_test = ['models/CNN/inception2_slim/inception2_slim.csv',
              #'models/RNN/pavel_attention_slim2/test_data_folded.csv',
              'models/RNN/pavel_all_outs_slim/birnn_all_outs.csv',
              'models/CAPS/cudrnn_caps_slim/cudrnn_caps_slim_test_data.csv']
+
+
 
 
 def get_values(csv_files, columns, hstack = False, with_labels=True):

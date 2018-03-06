@@ -18,7 +18,7 @@ import pickle
 from utilities import loadGloveModel, coverage
 from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, COMMENT, TRAIN_FILENAME, LIST_CLASSES, VALID_SLIM_FILENAME, TRAIN_SLIM_FILENAME, TEST_FILENAME
 
-model_baseline = BIRNN().gru_ATT_6
+model_baseline = CNN().vgg_5_dilations2
 
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
 
@@ -48,6 +48,7 @@ class Config:
     tokenize_mode = 'twitter'
     do_spellcheck_oov_words = False
     mode_embeddings = 'fasttext_300d'
+    glove = True #important for preprocessing
     if do_synthezize_embeddings:
         synth_threshold = 0.7
     char_embedding_size = 256
@@ -57,22 +58,25 @@ class Config:
     max_seq_len_chars = 500
     max_words = 200000
     rnn_units = 64
+    num_filters = 64
     att_size = 10
-    fc_units = [256]
+    fc_units = []
+    vgg_depth = 5
     epochs = 30
-    model_name = 'gru_ATT_4'
+    model_name = 'vgg5_dilations'
     root = ''
-    fp = 'models/RNN/' + model_name + '/'
+    fp = 'models/CNN/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
     max_models_to_keep = 1
     save_by_roc = False
     level = ['word']
-    lr = 0.0004
+    lr = 0.002
     decay = 1
     decay_steps = 400
     keep_prob = 0.5
+    optimizer = 'adam'
     use_saved_embedding_matrix = True
     regularization_scale = None #0.0001
     char_vocab_size = 0
@@ -370,9 +374,13 @@ class Model:
 
             with tf.variable_scope('optim'):
                 #self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate).minimize(self.loss,global_step=self.global_step)
-                self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.cost,global_step=self.global_step)
-
-
+                if self.cfg.optimizer == 'adam':
+                    self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.cost,global_step=self.global_step)
+                elif self.cfg.optimizer == 'rms':
+                    self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate).minimize(self.loss,
+                                                                                                       global_step=self.global_step)
+                else:
+                    self.optimizer = None
             with tf.variable_scope('saver'):
                 self.saver = tf.train.Saver(max_to_keep=self.cfg.max_models_to_keep)
 
@@ -509,9 +517,9 @@ def train_folds(fold_count=10):
             #valid_data = preprocess(valid_data,add_polarity=True)
             test_data = preprocess(test_data, add_polarity=True)
         else:
-            train_data = preprocess(train_data)
+            train_data = preprocess(train_data, glove=cfg.glove)
             #valid_data = preprocess(valid_data)
-            test_data = preprocess(test_data)
+            test_data = preprocess(test_data,glove=cfg.glove)
 
     sentences_train = train_data["comment_text"].fillna("_NAN_").values
     #sentences_valid = valid_data["comment_text"].fillna("_NAN_").values
@@ -535,7 +543,7 @@ def train_folds(fold_count=10):
                 embedding_word_dict = pickle.load(f)
             embedding_matrix = np.load(tc.cfg.fp + 'embedding.npy')
             id_to_embedded_word = dict((id, word) for word, id in embedding_word_dict.items())
-
+            coverage(tokenized_sentences_train, embedding_word_dict)
         else:
             embedding_matrix, embedding_word_dict, id_to_embedded_word = tc.prepare_embeddings(tc.word2id)
             coverage(tokenized_sentences_train,embedding_word_dict)
@@ -589,5 +597,5 @@ def train_folds(fold_count=10):
         m.train(X_train, Y_train, X_valid, Y_valid, X_test, embedding_matrix, fold_id)
 
 
-#if __name__ == '__main__':
-train_folds(fold_count=10)
+if __name__ == '__main__':
+    train_folds(fold_count=10)

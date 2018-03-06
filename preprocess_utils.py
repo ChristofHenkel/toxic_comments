@@ -712,12 +712,14 @@ class Preprocessor:
         return text
 
 
-def preprocess(data, add_polarity = False):
+def preprocess(data, add_polarity = False, glove = False):
 
     print('preprocessing')
     p = Preprocessor()
     data[COMMENT] = data[COMMENT].map(lambda x: p.lower(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_breaks(x))
+    if glove:
+        data[COMMENT] = data[COMMENT].map(lambda x: p.glove_preprocess(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.expand_contractions(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.replace_smileys(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.replace_ip(x))

@@ -20,7 +20,7 @@ VALID_DATA_FN = VALID_SLIM_FILENAME
 
 use_GPU = True
 root = 'models/RNN/'
-model = 'gru_ATT_3/'
+model = 'gru_ATT_6_glove/'
 model_fp = root + model
 logs = root + model + 'logs/'
 fn_words_dict = root + model + 'tc_words_dict.p'
@@ -98,12 +98,13 @@ if cfg.do_preprocess:
         print('preprocessing valid (w polarity)')
         valid_data = preprocess(valid_data,add_polarity=True)
     else:
+        glove = cfg.glove == 'True'
         print('preprocessing test')
-        test_data = preprocess(test_data)
+        test_data = preprocess(test_data, glove=glove)
         print('preprocessing train')
-        train_data = preprocess(train_data)
+        train_data = preprocess(train_data,glove=glove)
         print('preprocessing valid')
-        valid_data = preprocess(valid_data)
+        valid_data = preprocess(valid_data,glove=glove)
 
 
 if cfg.level == 'word':

@@ -11,25 +11,23 @@
 
 import gc
 import pandas as pd
-
+from sklearn.linear_model import LogisticRegression
+from sklearn.feature_selection import SelectFromModel
 from scipy.sparse import csr_matrix, hstack
 from global_variables import LIST_CLASSES, TRAIN_FILENAME, TEST_FILENAME, TRAIN_SLIM_FILENAME, \
     NAN_WORD, COMMENT, SAMPLE_SUBMISSION_FILENAME, LIST_LOGITS
 from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.feature_selection import SelectFromModel
 from sklearn.model_selection import KFold
-from sklearn.linear_model import LogisticRegression
-import lightgbm as lgb
+from xgboost import XGBRegressor
 from utilities import write_config
 
 
 class Config:
 
     train_fn = TRAIN_FILENAME
-    root = 'models/LGB/'
-    model_name = 'hurford4/'
+    root = 'models/XGB/'
+    model_name = 'xgb1/'
     fp = root + model_name
     fn_out_train = 'l2_train_data.csv'
     fp_out_train = fp + fn_out_train
@@ -49,27 +47,15 @@ class Config:
     c_stop_words='english'
     c_ngram_range=(2, 6)
     c_max_features=50000
-    lr_solver = 'sag'
-    sfm_threshold = 0.2
-    lgb_params =  {'learning_rate': 0.2,
-                  'application': 'binary',
-                  'num_leaves': 31,
-                  'verbosity': -1,
-                  'metric': {'l2', 'auc'},
-                  'data_random_seed': 2,
-                  'bagging_fraction': 0.8,
-                  'feature_fraction': 0.6,
-                  'bagging_freq': 5,
-                  'nthread': 4,
-                  'lambda_l1': 1,
-                  'lambda_l2': 1,
-                  'early_stopping_rounds' : 10}
-    lgb_rounds_lookup = {'toxic': 140,
-                     'severe_toxic': 50,
-                     'obscene': 80,
-                     'threat': 80,
-                     'insult': 70,
-                     'identity_hate': 80}
+    objective = 'binary:logistic'
+    eta = 0.095
+    max_depth = 5
+    silent = 1
+    eval_metric = 'auc'
+    min_child_weight = 2
+    subsample = 0.7
+    colsample_bytree = 0.7
+
 
 cfg = Config()
 write_config(Config)
@@ -128,11 +114,11 @@ gc.collect()
 list_of_preds_test = []
 list_of_preds_valid = []
 list_of_Y = []
-for class_name in LIST_CLASSES:
+for i, class_name in enumerate(LIST_CLASSES):
     print(class_name)
     train_target = train[class_name]
-    model = LogisticRegression(solver=cfg.lr_solver)
-    sfm = SelectFromModel(model, threshold=cfg.sfm_threshold)
+    model = LogisticRegression(solver='sag')
+    sfm = SelectFromModel(model, threshold=0.2)
     print(train_features.shape)
     print('fitting select from model')
     train_sparse_matrix = sfm.fit_transform(train_features, train_target)
@@ -144,18 +130,13 @@ for class_name in LIST_CLASSES:
         X_train, X_valid = train_sparse_matrix[train_index], train_sparse_matrix[valid_index]
         Y_train, Y_valid = train_target[train_index], train_target[valid_index]
         list_of_Y.append(Y_valid)
-        d_train = lgb.Dataset(X_train, label=Y_train)
-        d_valid = lgb.Dataset(X_valid, label=Y_valid)
-        params = cfg.lgb_params
-        rounds_lookup = cfg.lgb_rounds_lookup
-        print('training lgb')
-        model = lgb.train(params,
-                          train_set=d_train,
-                          num_boost_round=rounds_lookup[class_name],
-                          valid_sets=d_valid,
-                          verbose_eval=10)
-        preds_test = model.predict(test_sparse_matrix,num_iteration=model.best_iteration)
-        preds_valid = model.predict(X_valid,num_iteration=model.best_iteration)
+
+        print('training xgb')
+        model = XGBRegressor(objective=cfg.objective, max_depth=cfg.max_depth, n_estimators=100, learning_rate=0.1, subsample=cfg.subsample,
+                           min_child_weight=cfg.min_child_weight,eta=0.095,colsample_bytree=0.7,silent=False)
+        model.fit(X_train, Y_train)
+        preds_test = model.predict(test_sparse_matrix)
+        preds_valid = model.predict(X_valid)
         list_of_preds_test.append(preds_test)
         list_of_preds_valid.append(preds_valid)
 
