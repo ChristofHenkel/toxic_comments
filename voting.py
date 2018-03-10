@@ -17,7 +17,7 @@ from utilities import corr_matrix
 list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 list_logits = ['logits_' + c for c in list_classes]
 
-csvs_train = ['models/CNN/inception_2_2/train_logits_folded.csv',
+csvs_train = ['models/CNN/inception5_slim/train_logits_folded.csv',
               'models/RNN/pavel_baseline/train_logits_folded.csv',
               'models/CAPS/caps_first_test/train_logits/caps_first_testk0_e3.csv']
 

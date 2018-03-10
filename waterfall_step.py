@@ -9,6 +9,7 @@ predictions = pd.read_csv('models/PUBLIC/one_more_blend 0.9847.csv', index_col=0
 valids = pd.read_csv('models/RNN/pavel_all_outs_slim/birnn_all_outs_slim_baggin_logits_folded.csv', index_col=1)
 #a = predictions.loc[predictions[LIST_CLASSES] > 0.99]
 test = pd.read_csv(TEST_FILENAME, index_col=0)
+
 def find_good_predicts(valids, column):
 
     b1 = valids[column] > 0.995

@@ -18,7 +18,7 @@ list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identit
 list_logits = ['logits_' + c for c in list_classes]
 
 
-csv_1 = 'models/CNN/inception_2_2/train_logits_folded.csv'
+csv_1 = 'models/CNN/inception5_slim/train_logits_folded.csv'
 df1 = pd.read_csv(csv_1)
 p1 = df1[list_logits].values
 

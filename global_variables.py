@@ -5,6 +5,7 @@ COMMENT = "comment_text"
 LIST_CLASSES = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
 MODELS_FP = 'models/'
 TRAIN_FILENAME = 'assets/raw_data/train.csv'
+TRAIN_FILENAME_FR = 'assets/raw_data/train_fr.csv'
 TEST_FILENAME = 'assets/raw_data/test.csv'
 LIST_LOGITS = ['logits_' + c for c in LIST_CLASSES]
 TRAIN_SLIM_FILENAME = 'assets/raw_data/train_slim.csv'

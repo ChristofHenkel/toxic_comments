@@ -175,7 +175,7 @@ for epoch in epochs:
 test_predicts = fold_predicts(test_results_list)
 submission = pd.read_csv(SAMPLE_SUBMISSION_FILENAME)
 submission[LIST_CLASSES] = test_predicts
-submission.to_csv(root + model + "test_data_folded.csv", index=False)
+submission.to_csv(root + model + "l2_test_data.csv", index=False)
 
 
 valid_results_list = []

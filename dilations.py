@@ -1,0 +1,1 @@
+https://www.kaggle.com/kmader/character-level-cnn-classification-with-dilations
