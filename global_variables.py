@@ -11,3 +11,5 @@ LIST_LOGITS = ['logits_' + c for c in LIST_CLASSES]
 TRAIN_SLIM_FILENAME = 'assets/raw_data/train_slim.csv'
 VALID_SLIM_FILENAME = 'assets/raw_data/valid_slim.csv'
 SAMPLE_SUBMISSION_FILENAME = 'assets/raw_data/sample_submission.csv'
+UNKNOWN_CHAR = 'ⓤ'
+PAD_CHAR = '℗'
