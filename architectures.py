@@ -116,7 +116,7 @@ class CNN:
         return logits
 
 
-    def inception_3(self,embedding_matrix,x,keep_prob):
+    def inception_3(self,embedding_matrix,x,keep_prob,cfg):
         """
         https://github.com/dennybritz/cnn-text-classification-tf/blob/master/text_cnn.py
         :param embedding_matrix:
@@ -126,8 +126,8 @@ class CNN:
         """
 
         with tf.name_scope("Embedding"):
-            #embedding = tf.get_variable("embedding", tf.shape(embedding_matrix), dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
-            embedded_input = tf.nn.embedding_lookup(embedding_matrix, x, name="embedded_input")
+            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
             #x2 = embedded_input
         pooled_outputs = []
         for i in [1,3,5]:
@@ -671,6 +671,33 @@ class CCNN:
 class CRNN:
 
     @staticmethod
+    def spatial_dropout(x, keep_prob, seed=1234):
+        # x is a convnet activation with shape BxWxHxF where F is the
+        # number of feature maps for that layer
+        # keep_prob is the proportion of feature maps we want to keep
+
+        # get the batch size and number of feature maps
+        num_feature_maps = [tf.shape(x)[0], tf.shape(x)[2]]
+
+        # get some uniform noise between keep_prob and 1 + keep_prob
+        random_tensor = keep_prob
+        random_tensor += tf.random_uniform(num_feature_maps,
+                                           seed=seed,
+                                           dtype=x.dtype)
+
+        # if we take the floor of this, we get a binary matrix where
+        # (1-keep_prob)% of the values are 0 and the rest are 1
+        binary_tensor = tf.floor(random_tensor)
+
+        # Reshape to multiply our feature maps by this tensor correctly
+        binary_tensor = tf.reshape(binary_tensor,
+                                   [-1, 1, tf.shape(x)[2]])
+        # Zero out feature maps where appropriate; scale up to compensate
+        ret = tf.div(x, keep_prob) * binary_tensor
+        return ret
+
+
+    @staticmethod
     def cnn_rnn(embedding_matrix,x,keep_prob):
         embedding = tf.get_variable("embedding", [embedding_matrix.get_shape()[0],embedding_matrix.get_shape()[1]], dtype=tf.float32)
         embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
@@ -756,12 +783,12 @@ class CRNN:
         logits = tf.contrib.layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
-    @staticmethod
-    def cudnn_cnn_rnn2(embedding_matrix, x, keep_prob):
+
+    def cudnn_cnn_rnn2(self,embedding_matrix, x, keep_prob):
         embedding = tf.get_variable("embedding", [embedding_matrix.get_shape()[0], embedding_matrix.get_shape()[1]],
                                     dtype=tf.float32)
         embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
-        x2 = embedded_input
+        x2 = self.spatial_dropout(embedded_input, keep_prob)
         for i in range(3, 3 + 2):
             x2 = tf.layers.conv1d(x2, filters=2 ** (i+4), kernel_size=3, strides=1,dilation_rate=2**(i-3),activation=tf.nn.relu)
             x2 = tf.layers.conv1d(x2, filters=2 ** (i+4), kernel_size=3, strides=1,dilation_rate=2**(i-3),activation=tf.nn.relu)
@@ -779,6 +806,28 @@ class CRNN:
         # with tf.variable_scope('fc'):
         #    prelogits = layers.fully_connected(outputs, 32, activation_fn=tf.nn.elu)
 
+        logits = tf.contrib.layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
+    def cudnn_cnn_rnn3(self,embedding_matrix, x, keep_prob,cfg):
+        embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]],
+                                    dtype=tf.float32)
+        embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+        x2 = self.spatial_dropout(embedded_input, keep_prob)
+        for i in range(3, 3 + 2):
+            x2 = tf.layers.conv1d(x2, filters=2 ** (i+4), kernel_size=3, strides=1,dilation_rate=2**(i-3),activation=tf.nn.relu)
+            x2 = tf.layers.conv1d(x2, filters=2 ** (i+4), kernel_size=3, strides=1,dilation_rate=2**(i-3),activation=tf.nn.relu)
+        x2 = tf.layers.max_pooling1d(x2, pool_size=2, strides=2)
+        x2 = Bidirectional(CuDNNGRU(32, return_sequences=True))(x2)
+        outputs = tf.transpose(x2, [0, 2, 1])
+        last = outputs[:, :, -1]
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        x3 = tf.concat([maxs, means,last], axis=1)
+
+        # with tf.variable_scope('fc'):
+        #    prelogits = layers.fully_connected(outputs, 32, activation_fn=tf.nn.elu)
+        x3 = tf.nn.dropout(x3, keep_prob=keep_prob)
         logits = tf.contrib.layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
@@ -1639,6 +1688,28 @@ class BIRNN:
         logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
+    def gru_CNN(self,embedding_matrix, x, keep_prob, cfg):
+
+        with tf.name_scope("Embedding"):
+            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+
+        x2 = self.spatial_dropout(embedded_input,keep_prob)
+        x2 = Bidirectional(CuDNNGRU(cfg.rnn_units, return_sequences=True))(x2)
+
+        outputs = tf.transpose(x2, [0, 2, 1])
+        outputs = tf.layers.conv1d(outputs, filters=64, kernel_size=3, strides=1,activation=tf.nn.relu)
+
+        maxs = tf.reduce_max(outputs, axis=2)
+        means = tf.reduce_mean(outputs, axis=2)
+        x3 = tf.concat([maxs, means], axis=1)
+
+        for num_units in cfg.fc_units:
+            x3 = layers.fully_connected(x3, num_units, activation_fn=tf.nn.relu)
+        x3 = tf.nn.dropout(x3,keep_prob=keep_prob)
+        logits = layers.fully_connected(x3, 6, activation_fn=tf.nn.sigmoid)
+        return logits
+
     @staticmethod
     def gru_BN_2(embedding_matrix, x, keep_prob):
 
@@ -1808,6 +1879,32 @@ class CAPS:
         pass
 
     @staticmethod
+    def spatial_dropout(x, keep_prob, seed=1234):
+        # x is a convnet activation with shape BxWxHxF where F is the
+        # number of feature maps for that layer
+        # keep_prob is the proportion of feature maps we want to keep
+
+        # get the batch size and number of feature maps
+        num_feature_maps = [tf.shape(x)[0], tf.shape(x)[2]]
+
+        # get some uniform noise between keep_prob and 1 + keep_prob
+        random_tensor = keep_prob
+        random_tensor += tf.random_uniform(num_feature_maps,
+                                           seed=seed,
+                                           dtype=x.dtype)
+
+        # if we take the floor of this, we get a binary matrix where
+        # (1-keep_prob)% of the values are 0 and the rest are 1
+        binary_tensor = tf.floor(random_tensor)
+
+        # Reshape to multiply our feature maps by this tensor correctly
+        binary_tensor = tf.reshape(binary_tensor,
+                                   [-1, 1, tf.shape(x)[2]])
+        # Zero out feature maps where appropriate; scale up to compensate
+        ret = tf.div(x, keep_prob) * binary_tensor
+        return ret
+
+    @staticmethod
     def prelu(_x):
         alphas = tf.get_variable('alpha', _x.get_shape()[-1],
                                  initializer=tf.constant_initializer(0.0),
@@ -1817,7 +1914,7 @@ class CAPS:
 
         return pos + neg
 
-    def routing(self,input, b_IJ, iter_routing=3, caps_dim_in=6, caps_dim_out=8, num_caps_out=6):
+    def routing(self,input, b_IJ, iter_routing=3, caps_dim_in=6, caps_dim_out=8, num_caps_out=6, num_routes = 3):
         ''' The routing algorithm.
         Args:
             input: A Tensor with [batch_size, num_caps_l=1152, 1, length(u_i)=8, 1]
@@ -1856,7 +1953,7 @@ class CAPS:
         u_hat_stopped = tf.stop_gradient(u_hat, name='stop_gradient')
 
         # line 3,for r iterations do
-        for r_iter in range(3):
+        for r_iter in range(num_routes):
             with tf.variable_scope('iter_' + str(r_iter)):
                 # line 4:
                 # => [batch_size, 1152, 10, 1, 1]
@@ -2250,13 +2347,13 @@ class CAPS:
 
             return logits
 
-    def cudnnrnn_caps(self,em,x,keep_prob,bsize):
-
+    def cudnnrnn_caps(self,embedding_matrix,x,keep_prob,cfg):
+        bsize = cfg.bsize
         n_caps = 6
         n_capfilter = 32
         with tf.name_scope("Embedding"):
-            # embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
-            embedded_input = tf.nn.embedding_lookup(em, x, name="embedded_input")
+            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
 
         x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(embedded_input)
 
@@ -2291,6 +2388,47 @@ class CAPS:
         logits = tf.contrib.layers.fully_connected(flat_capsules, 6, activation_fn=tf.nn.sigmoid)
         return logits
 
+    def cudnnrnn_caps2(self,embedding_matrix,x,keep_prob,cfg):
+        bsize = cfg.bsize
+        n_caps = 6
+        n_capfilter = 32
+        with tf.name_scope("Embedding"):
+            embedding = tf.get_variable("embedding", [embedding_matrix.shape[0], embedding_matrix.shape[1]], dtype=tf.float32,initializer=tf.constant_initializer(embedding_matrix), trainable=False)
+            embedded_input = tf.nn.embedding_lookup(embedding, x, name="embedded_input")
+        x2 = self.spatial_dropout(embedded_input,keep_prob)
+        x2 = Bidirectional(CuDNNGRU(64, return_sequences=True))(x2)
+
+        outputs = tf.transpose(x2, [0, 2, 1])
+        with tf.variable_scope('PrimaryCaps_layer'):
+            capsules = tf.layers.conv1d(outputs, filters=n_capfilter * n_caps,
+                                        kernel_size=9,
+                                        strides=2,
+                                        activation=tf.nn.relu)
+            capsules = tf.expand_dims(capsules, 3)
+            capsules = tf.reshape(capsules, (bsize, 60 * n_capfilter, n_caps, 1))
+            capsules = self.squash(capsules)
+
+        with tf.variable_scope('FCCaps_layer'):
+            # digitCaps = CapsLayer(num_outputs=10, vec_len=16, with_routing=True, layer_type='FC')
+            # caps2 = digitCaps(capsules_squashed)
+
+            input = tf.reshape(capsules, shape=(bsize, 60 * 32, 1, n_caps, 1))
+
+        with tf.variable_scope('routing'):
+            # b_IJ: [batch_size, num_caps_l, num_caps_l_plus_1, 1, 1],
+            # about the reason of using 'batch_size', see issue #21
+            b_IJ = tf.constant(np.zeros([bsize, input.shape[1].value, 6, 1, 1], dtype=np.float32))
+            capsules = self.routing(input, b_IJ, num_caps_out=6, caps_dim_out=8, num_routes=3)
+            capsules = tf.squeeze(capsules, axis=1)
+
+        # cap_norms = tf.norm(capsules, axis=2)[:,:,0]
+        # cap_norms = tf.minimum(tf.maximum(cap_norms,0),1)
+
+        flat_capsules = tf.layers.flatten(capsules)
+        #flat_capsules = layers.dropout(flat_capsules,keep_prob)
+        logits = tf.contrib.layers.fully_connected(flat_capsules, 6, activation_fn=tf.nn.sigmoid)
+
+        return logits
 
 class DENSE:
 

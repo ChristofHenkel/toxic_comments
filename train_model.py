@@ -8,6 +8,7 @@ from utilities import get_oov_vector
 import nltk
 from nltk.tokenize import TweetTokenizer
 from gensim.models import KeyedVectors, FastText
+from keras.preprocessing.text
 import tqdm
 import os
 import time
@@ -16,9 +17,9 @@ from augmentation import retranslation, mixup, synonyms
 from architectures import CNN, CAPS, BIRNN, CRNN, DENSE, CNNRNN, HYBRID
 import pickle
 from utilities import loadGloveModel, coverage
-from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, COMMENT, TRAIN_FILENAME, LIST_CLASSES, VALID_SLIM_FILENAME, TRAIN_SLIM_FILENAME, TEST_FILENAME
+from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, COMMENT, TRAIN_FILENAME, TRAIN_FILENAME_FR, LIST_CLASSES, VALID_SLIM_FILENAME, TRAIN_SLIM_FILENAME, TEST_FILENAME
 
-model_baseline = CNN().vgg_5_dilations2
+model_baseline = CAPS().cudnnrnn_caps2
 
 results = pd.DataFrame(columns=['fold_id','epoch','roc_auc_v','roc_auc_t','cost_val'])
 
@@ -48,24 +49,24 @@ class Config:
     tokenize_mode = 'twitter'
     do_spellcheck_oov_words = False
     mode_embeddings = 'fasttext_300d'
-    glove = True #important for preprocessing
+    glove = False #important for preprocessing
     if do_synthezize_embeddings:
         synth_threshold = 0.7
     char_embedding_size = 256
-    min_count_chars = 100
+    min_count_chars = 50
     bsize = 512
     max_seq_len = 300
-    max_seq_len_chars = 500
-    max_words = 200000
-    rnn_units = 64
+    max_seq_len_chars = 1000
+    max_words = 1000000
+    rnn_units = 128
     num_filters = 64
     att_size = 10
     fc_units = []
     vgg_depth = 5
-    epochs = 30
-    model_name = 'vgg5_dilations'
+    epochs = 10
+    model_name = 'cudrnn_caps'
     root = ''
-    fp = 'models/CNN/' + model_name + '/'
+    fp = 'models/CAPS/' + model_name + '/'
     logs_path = fp + 'logs/'
     if not os.path.exists(root + fp):
         os.mkdir(root + fp)
@@ -75,8 +76,8 @@ class Config:
     lr = 0.002
     decay = 1
     decay_steps = 400
-    keep_prob = 0.5
-    optimizer = 'adam'
+    keep_prob = 0.7
+    optimizer = 'rms'
     use_saved_embedding_matrix = True
     regularization_scale = None #0.0001
     char_vocab_size = 0
@@ -96,7 +97,7 @@ class ToxicComments:
         for sentence in tqdm.tqdm(sentences,mininterval=5):
             if hasattr(sentence, "decode"):
                 sentence = sentence.decode("utf-8")
-            sentence = self.preprocessor.expand_contractions(sentence)
+            #sentence = self.preprocessor.expand_contractions(sentence)
             if mode == 'nltk':
                 tokens = nltk.tokenize.word_tokenize(sentence)
             elif mode == 'twitter':
@@ -347,7 +348,7 @@ class Model:
             # tf Graph input
             tf.set_random_seed(1)
 
-            if 'word' and 'char' in self.cfg.level:
+            if 'word' in self.cfg.level and 'char' in self.cfg.level:
                 self.x = tf.placeholder(tf.int32, shape=(self.cfg.bsize, self.cfg.max_seq_len + self.cfg.max_seq_len_chars), name="x")
             elif 'word' in self.cfg.level:
                 self.x = tf.placeholder(tf.int32, shape=(self.cfg.bsize, self.cfg.max_seq_len), name="x")

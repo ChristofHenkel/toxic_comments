@@ -19,10 +19,12 @@ TEST_DATA_FN = TEST_FILENAME
 VALID_DATA_FN = VALID_SLIM_FILENAME
 
 use_GPU = True
-root = 'models/RNN/'
-model = 'gru_ATT_6_glove/'
+root = 'models/CAPS/'
+model = 'cudrnn_caps/'
 model_fp = root + model
 logs = root + model + 'logs/'
+
+
 fn_words_dict = root + model + 'tc_words_dict.p'
 fn_embedding_words_dict = root + model + 'embedding_word_dict.p'
 do_submission = True
@@ -41,6 +43,10 @@ load_config(cfg, model_fp)
 
 # should be removed
 cfg.level = 'word'
+cfg.glove = 'False'
+cfg.tokenize_mode = 'twitter'
+cfg.do_preprocess = 'True'
+
 
 tc = ToxicComments(cfg)
 epochs = [fn.split('.ckpt')[0] for fn in os.listdir(logs) if fn.endswith('.meta')]
@@ -76,35 +82,36 @@ def transform_data(data):
     X = np.array(list_of_token_ids)
     return X
 
+if cfg.level == 'word':
+    with open(fn_words_dict, 'rb') as f:
+        words_dict = pickle.load(f)
+    with open(fn_embedding_words_dict, 'rb') as f:
+        embedding_word_dict = pickle.load(f)
 
-with open(fn_words_dict, 'rb') as f:
-    words_dict = pickle.load(f)
-with open(fn_embedding_words_dict, 'rb') as f:
-    embedding_word_dict = pickle.load(f)
-
-embedding_matrix = np.load(root + model + 'embedding.npy')
-tc.id2word = dict((id, word) for word, id in words_dict.items())
+    embedding_matrix = np.load(root + model + 'embedding.npy')
+    tc.id2word = dict((id, word) for word, id in words_dict.items())
 
 test_data = pd.read_csv(TEST_DATA_FN)
 valid_data = pd.read_csv(VALID_DATA_FN, index_col=1)
 train_data = pd.read_csv(TRAIN_DATA_FN)
 Y_train = train_data[LIST_CLASSES].values
-if cfg.do_preprocess:
-    if cfg.add_polarity == 'True':
-        print('preprocessing test (w polarity)')
-        test_data = preprocess(test_data,add_polarity=True)
-        print('preprocessing train (w polarity)')
-        train_data = preprocess(train_data,add_polarity=True)
-        print('preprocessing valid (w polarity)')
-        valid_data = preprocess(valid_data,add_polarity=True)
-    else:
-        glove = cfg.glove == 'True'
-        print('preprocessing test')
-        test_data = preprocess(test_data, glove=glove)
-        print('preprocessing train')
-        train_data = preprocess(train_data,glove=glove)
-        print('preprocessing valid')
-        valid_data = preprocess(valid_data,glove=glove)
+if cfg.do_preprocess == 'True':
+#    if cfg.add_polarity == 'True':
+#        print('preprocessing test (w polarity)')
+#        test_data = preprocess(test_data,add_polarity=True)
+#        print('preprocessing train (w polarity)')
+#        train_data = preprocess(train_data,add_polarity=True)
+#        print('preprocessing valid (w polarity)')
+#        valid_data = preprocess(valid_data,add_polarity=True)
+#    else:
+
+    glove = cfg.glove == 'True'
+    print('preprocessing test')
+    test_data = preprocess(test_data, glove=glove)
+    print('preprocessing train')
+    train_data = preprocess(train_data,glove=glove)
+    print('preprocessing valid')
+    valid_data = preprocess(valid_data,glove=glove)
 
 
 if cfg.level == 'word':
@@ -136,14 +143,15 @@ if cfg.level == 'word':
 
 elif cfg.level == 'char':
     train_data = pd.read_csv(TRAIN_DATA_FN)
-    preprocessor = Preprocessor(min_count_chars=10)
+    preprocessor = Preprocessor(min_count_chars=50)
 
     sentences_train = train_data["comment_text"].fillna("_NAN_").values
     # sentences_train = [preprocessor.lower(text) for text in sentences_train]
     preprocessor.create_char_vocabulary(sentences_train)
     embedding_matrix = np.zeros((preprocessor.char_vocab_size, cfg.char_embedding_size))
     sentences_test = test_data["comment_text"].fillna("_NAN_").values
-    X_test = preprocessor.char2seq(sentences_test, maxlen=2000)
+    X_test = preprocessor.char2seq(sentences_test, maxlen=1000)
+    X_train = preprocessor.char2seq(sentences_train, maxlen=1000)
     embedding_matrix = np.zeros((preprocessor.char_vocab_size, cfg.char_embedding_size))
 else:
     print('wrong level')
@@ -170,8 +178,8 @@ def predict(epoch, X):
     #[print(n.name) for n in tf.get_default_graph().as_graph_def().node]
     for b in tqdm.tqdm(range(num_batches-1)):
         batch_x = X[b*cfg.bsize:(b+1)*cfg.bsize]
-        result = sess.run('fully_connected_3/Sigmoid:0', feed_dict={'x:0': batch_x,
-                                                                    #'em:0':embedding_matrix,
+        result = sess.run('fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
+                                                                  # 'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result)
 
@@ -181,8 +189,8 @@ def predict(epoch, X):
         batch_x = np.repeat(batch_x, b, axis=0)
         batch_x = batch_x[:cfg.bsize]
 
-        result = sess.run('fully_connected_3/Sigmoid:0', feed_dict={'x:0': batch_x,
-                                                                    #'em:0':embedding_matrix,
+        result = sess.run('fully_connected/Sigmoid:0', feed_dict={'x:0': batch_x,
+                                                                   #'em:0':embedding_matrix,
                                                               'keep_prob:0': 1})
         results.append(result[:bsize_last_batch])
     sess.close()

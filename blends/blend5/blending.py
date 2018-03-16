@@ -13,8 +13,8 @@ lgb_public = pd.read_csv('models/PUBLIC/lightgbm-with-select-k-best-on-tfidf/lgb
 lgb = pd.read_csv('models/LGB/hurford2/l2_test_data.csv') #0.9802
 sup = pd.read_csv('models/PUBLIC/blend-of-blends-1/superblend_1.csv')
 gru_ATT_4 = pd.read_csv('models/RNN/gru_ATT_4/l2_test_data.csv') #0.9848
-
-
+gru_ATT_6_glove = pd.read_csv('models/RNN/gru_ATT_6_glove/l2_test_data.csv')
+inception5b = pd.read_csv('models/CNN/inception5b/l2_test_data.csv')
 
 for label in LIST_CLASSES:
     print('Scaling {}... Please stand by.'.format(label))
@@ -24,6 +24,8 @@ for label in LIST_CLASSES:
     lstm[label] = minmax_scale(lstm[label])
     nb_svm[label] = minmax_scale(nb_svm[label])
     gru_ATT_4[label] = minmax_scale(gru_ATT_4[label])
+    gru_ATT_6_glove[label] = minmax_scale(gru_ATT_6_glove[label])
+    inception5b[label] = minmax_scale(inception5b[label])
     sup[label] = minmax_scale(sup[label])
 
 

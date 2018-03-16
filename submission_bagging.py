@@ -14,10 +14,10 @@ else:
     new_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
 #csv_files = os.listdir(input_fp)
 
-#csv_files = ['models/CNN/inception2_slim/test_data_folded.csv',
+#csv_files = ['models/CNN/inception2_slim/l2_test_data.csv',
 #             'models/NBSVM/slim/nbsvm_submission.csv',
-#             'models/RNN/pavel_attention_slim2/test_data_folded.csv',
-#             'models/RNN/pavel_all_outs_slim/test_data_folded.csv']
+#             'models/RNN/pavel_attention_slim2/l2_test_data.csv',
+#             'models/RNN/pavel_all_outs_slim/l2_test_data.csv']
 
 csv_files = ['models/PUBLIC/' + fn for fn in os.listdir('models/PUBLIC/') if fn.endswith('.csv')]
 
