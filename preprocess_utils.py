@@ -1,6 +1,7 @@
 import nltk.data
 from nltk.corpus import stopwords
 import json
+import itertools
 import re
 import numpy as np
 import collections
@@ -10,6 +11,7 @@ from nltk.tokenize import word_tokenize
 from nltk.tokenize import TweetTokenizer
 import logging
 from utilities import load_bad_words
+from textblob import TextBlob
 import tqdm
 from num2words import num2words
 from global_variables import COMMENT
@@ -68,7 +70,6 @@ class CNNTransformer:
                 ind = self.char2index[self.unknown_char]
             seq[k] = ind
         return seq
-
 
 
 class Preprocessor:
@@ -134,19 +135,145 @@ class Preprocessor:
             "i'll've": "i shall have",
             "i'm": "i am",
             "i've": "i have",
+            'marcolfuck':'marcol fuck',
+            'wikiprojects':'wiki projects',
+            'youbollocks':'you bull shit',
+            'ancestryfuck':'ancestry fuck',
+            'ricehappy':'rice happy',
+            'aidsaids':'aids aids',
+            'smileyrick':'smiley rick',
+            'wikipediahappy':'wikipedia happy',
+            'talkhappy':'talk happy',
+            'talklol':'talk lol',
+            'userhappy':'user happy',
+            'mainpagebg':'mainpage background',
+            '@ggot':'faggot',
+            'smileyrecious':'smiley recious',
+            'nooob':'noob',
+            'urlsmiley':'url smiley',
+            'ashol':'asshole',
+            'smileyp':'smiley',
+            'latinus':'latino',
+            'userlol':'user lol',
+            "god's":'gods',
+            "pneis":'penis',
+            "else's":'else his',
+            'pennnis':'penis',
+            'youfuck':'you fuck',
+            'phuq':'fuck',
+            'philippineslong':'philippines long',
+            "women's":'womens',
+            'wplol':'wikipedia lol',
+            "editor's":'editors',
+            'itsuck':'it suck',
+            "offfuck":'off fuck',
+            'tommytwo':'tommy two',
+            "file's":'files',
+            "other's":'others',
+            "gayfrozen":'gay frozen',
+            "mother's":'mothers',
+            "gayfag":'gay faggot',
+            "ip's":'ips',
+            "men's":'mens',
+            "today's":'todays',
+            "mothjer":'mother mispelled',
             "isn't": "is not",
             "it'd": "it had",
+            "anyone's":'anyones',
+            "website's":'websites',
+            "wiki's":'wikis',
+            "page's":'page is',
+            "aseven":'as even',
+            "wikipedia's":'wikipedias',
+            'npov':'neutral point of view',
+            "world's":'worlds',
+            "user's":'users',
+            "securityfuck": 'security fuck',
+            "one's":'ones',
+            'néger':'nigger',
+            "author's":'authors',
+            'roflspam':'rofl spam',
+            'niggors':'niggers',
+            'helloz':'hello',
+            'phck':'fuck',
+            'bonergasm':'boner orgasm',
+            'schäbig':'lame',
+            'bitchbot':'bitch robot',
+            'donkeysex':'donkey sex',
+            'faggt':'faggot',
+            'niggerjew':'nigger jew',
+            'dixz':'dicks',
+            'gayyour':'gay your',
+            'smileyo':'smile yo',
+            'backgrounhappy':'background happy',
+            'vaginapenis':'vagina penis',
+            'wphappy':'wp happy',
+            'smileyist':'smiley ist',
+            'radicalnigger':'radical nigger',
+            'oldihappy':'oldi happy',
+            'smileyx':'smiley x',
+            'peenus':'penis',
+            'motherfuckerdie':'motherfucker die',
+            'homopetersymonds':'homo peter symonds',
+            'honkhonk':'honk honk',
+            'analanal':'anal anal',
+            "sex'butt":"sex butt",
+            "here's":'here is',
+            "subject's":'subject is',
+            'fucksex':'fuck sex',
+            'smileyol':'smiley',
+            'yourselfgo':'yourself go',
+            "fggt":'faggot',
+            "person's":'persons',
+            "man's":"mans",
+            "article's":'articles',
             "it'd've": "it would have",
             "it'll": "it shall",
             "it'll've": "it shall have",
             "it's": "it has",
+            '#zero':'zero',
+            'pagedelete':'page delete',
+            'addressip':'address ip',
+            "image's":'images',
+            'imagehappy':'image happy',
+            'imagelol':'image lol',
+            'slimvirgin':'slim virgin',
             "let's": "let us",
             "ma'am": "madam",
+            'b00ll00x':'bull shit',
             "mayn't": "may not",
             "might've": "might have",
             "mightn't": "might not",
             "mightn't've": "might not have",
+            "people's":'peoples',
+            'cuntfranks':'cunt franks',
+            "3rr":'three revert rule',
+            '#f5fffa': 'mint green',
+            '`':' ',
+            'roycy':'badass',
+            '@hotmail':'email adress',
+            'fvckers':'fuckers',
+            'suckernguyen':'sucker nguyen',
+            'turkeyfuck':'turkey fuck',
+            'wpneutral':'wp neutral',
+            'faggotgay':'faggot gay',
+            'cuntliz':'cunt liz',
+            'smileylease':'smiley lease',
+            'sucksgeorge':'sucks george',
+            'hornyhorny':'horny horny',
+            'headsdick':'heads dick',
+            'helloe':'hello',
+            'kfuckity':'fuck city',
+            'smileyi':'smiley',
+            'ballsballs':'balls balls',
+            'serbiafack':'serbia fuck',
             "must've": "must have",
+            'wikipedialol':'wikipedia lol',
+            'wikilove':'wiki love',
+            'penispenis':'penis penis',
+            'fagsgod':'fags god',
+            'nigggers':'niggers',
+            'bitchbitch':'bitch bitch',
             "mustn't": "must not",
             "mustn't've": "must not have",
             "needn't": "need not",
@@ -231,6 +358,9 @@ class Preprocessor:
 
         return self.contractions_re.sub(replace, text)
 
+    @staticmethod
+    def strip_spaces(words):
+        return [w.replace(' ', '') for w in words]
 
     def replace_badwords_with_syn(self,text):
         for word in self.bad_words_synonyms:
@@ -259,14 +389,17 @@ class Preprocessor:
 
     @staticmethod
     def rm_hyperlinks(words):
-        words = [w for w in words if not (w.startswith('http') or w.startswith('www') or w.endswith('.com'))]
+        words = [w if not (w.startswith('http') or
+                           w.startswith('www') or
+                           w.endswith('.com') or
+                            w.startswith('en.wikipedia.org/')) else 'url' for w in words]
         return words
+
 
     @staticmethod
     def rm_links_text(text):
-        text = re.sub("http://. * ","", text)
-        text = re.sub("http://. * ", "", text)
-        text = re.sub("www..* ", "", text)
+        text = re.sub("http?s://.* ","url", text)
+        text = re.sub("www.* ", "url", text)
         return text
 
     @staticmethod
@@ -293,28 +426,52 @@ class Preprocessor:
 
     @staticmethod
     def rm_user(text):
-        text = re.sub("\[\[User(.*)\|","", text)
+        text = re.sub("\[\[User(.*)\|","user-id", text)
         return text
 
     @staticmethod
-    def rm_ip(text):
-        text = re.sub("\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}","",text)
+    def replace_ip(text):
+        text = re.sub("\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}","ip-address",text)
         return text
 
     @staticmethod
     def rm_article_id(text):
-        text = re.sub("\d:\d\d\s{0,5}$","" ,text)
+        text = re.sub("\d:\d\d\s{0,5}$","article-id" ,text)
         return text
 
     @staticmethod
     def rm_bigrams(text):
-        text = re.sub(r'[-–]',' ',text)
+        text = re.sub(r'[-–_]',' ',text)
+        return text
+
+    @staticmethod
+    def isolate_punc(text):
+        text = re.sub(r'([\'\"\.\(\)\!\?\-\\\/\,])', r' \1 ', text)
+        return text
+
+    @staticmethod
+    def replace_smileys(text):
+        """
+        adapted from https://nlp.stanford.edu/projects/glove/preprocess-twitter.rb
+
+        """
+        eyes = "[8:=;]"
+        nose = "['`\-]?"
+        # Different regex parts for smiley faces
+        text = re.sub("<3", 'heart emoji', text)
+        text = re.sub(eyes + nose + "[Dd)\]]", 'happy smiley', text)
+        text = re.sub("[(d]" + nose + eyes, 'happy smiley', text)
+        text = re.sub(eyes + nose + "p", 'lol smiley', text)
+        text = re.sub(eyes + nose + "\(", 'sad smiley', text)
+        text = re.sub("\)" + nose + eyes, 'sad smiley', text)
+        text = re.sub(eyes + nose + "[/|l*]", 'neutral smiley', text)
+
         return text
 
     def rm_leaky_features(self,text):
         text = self.rm_links_text(text)
         text = self.rm_article_id(text)
-        text = self.rm_ip(text)
+        text = self.replace_ip(text)
         text = self.rm_user(text)
         text = self.rm_breaks(text)
         return text
@@ -524,23 +681,63 @@ class Preprocessor:
             res[k][:len(seq)] = seq
         return res
 
+    @staticmethod
+    def glove_preprocess(text):
+        """
+        adapted from https://nlp.stanford.edu/projects/glove/preprocess-twitter.rb
+
+        """
+        # Different regex parts for smiley faces
+        eyes = "[8:=;]"
+        nose = "['`\-]?"
+        text = re.sub("https?:* ", "<URL>", text)
+        text = re.sub("www.* ", "<URL>", text)
+        text = re.sub("\[\[User(.*)\|", '<USER>', text)
+        text = re.sub("<3", '<HEART>', text)
+        text = re.sub("[-+]?[.\d]*[\d]+[:,.\d]*", "<NUMBER>", text)
+        text = re.sub(eyes + nose + "[Dd)]", '<SMILE>', text)
+        text = re.sub("[(d]" + nose + eyes, '<SMILE>', text)
+        text = re.sub(eyes + nose + "p", '<LOLFACE>', text)
+        text = re.sub(eyes + nose + "\(", '<SADFACE>', text)
+        text = re.sub("\)" + nose + eyes, '<SADFACE>', text)
+        text = re.sub(eyes + nose + "[/|l*]", '<NEUTRALFACE>', text)
+        text = re.sub("/", " / ", text)
+        text = re.sub("[-+]?[.\d]*[\d]+[:,.\d]*", "<NUMBER>", text)
+        text = re.sub("([!]){2,}", "! <REPEAT>", text)
+        text = re.sub("([?]){2,}", "? <REPEAT>", text)
+        text = re.sub("([.]){2,}", ". <REPEAT>", text)
+        pattern = re.compile(r"(.)\1{2,}")
+        text = pattern.sub(r"\1" + " <ELONG>", text)
+
+        return text
 
 
-def preprocess(data):
+def preprocess(data, add_polarity = False, glove = False):
 
     print('preprocessing')
     p = Preprocessor()
     data[COMMENT] = data[COMMENT].map(lambda x: p.lower(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_breaks(x))
+    if glove:
+        data[COMMENT] = data[COMMENT].map(lambda x: p.glove_preprocess(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.expand_contractions(x))
-    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_ip(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.replace_smileys(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.replace_ip(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_links_text(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.replace_numbers(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_bigrams(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.isolate_punc(x))
+
+    if add_polarity:
+        print('adding polarity')
+        zpolarity = {0: 'zero', 1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight',
+                     9: 'nine', 10: 'ten'}
+        zsign = {-1: 'negative', 0.: 'neutral', 1: 'positive'}
+        data['polarity'] = data[COMMENT].map(lambda x: int(TextBlob(x).sentiment.polarity * 10))
+        data[COMMENT] = data.apply(lambda r: str(r[COMMENT]) + ' polarity' + zsign[np.sign(r['polarity'])] + zpolarity[np.abs(r['polarity'])],axis=1)
+
     #data[COMMENT] = data[COMMENT].str.replace(r"[^A-Za-z0-9(),!?@\'\`\"\_\n]", " ")
     return data
-
-
 
 
 

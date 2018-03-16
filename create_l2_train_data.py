@@ -7,43 +7,41 @@ import pandas as pd
 import os
 from utilities import coverage
 from preprocess_utils import Preprocessor, preprocess
-from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, LIST_CLASSES, LIST_LOGITS, COMMENT, MODELS_FP
+from global_variables import UNKNOWN_WORD, END_WORD, NAN_WORD, LIST_CLASSES, LIST_LOGITS, COMMENT, MODELS_FP, TRAIN_SLIM_FILENAME, VALID_SLIM_FILENAME
 
 
 LEVEL = 'word'
 
 
+TRAIN_DATA_FN = TRAIN_SLIM_FILENAME
+#CFG_GPU = tf.ConfigProto(device_count={'GPU': 0})
+CFG_GPU = None
 
-TRAIN_DATA_FN = "assets/raw_data/bagging_train.csv"
-
-
-
-type_ = 'RNN/'
-model = 'pavel_all_outs_slim/'
+type_ = 'CRNN/'
+model = 'cudnn_cnn_rnn/'
 
 model_fp = MODELS_FP+type_ +model
+fn_out = 'l2_train_data.csv'
 
 logs = model_fp+'logs/'
 fn_words_dict = model_fp + 'tc_words_dict.p'
 fn_embedding_words_dict = model_fp + 'embedding_word_dict.p'
 
 class Config:
-    max_seq_len = 500
-    max_sentence_len = 500
-    bsize = 512
-    do_preprocess = True
+    pass
+
+
+
 
 cfg = Config()
-tc = ToxicComments(Config)
+cfg = load_config(cfg, model_fp)
+
+
+
+tc = ToxicComments(cfg)
 epochs = [fn.split('.ckpt')[0] for fn in os.listdir(logs) if fn.endswith('.meta')]
 
-with open(fn_words_dict, 'rb') as f:
-    words_dict = pickle.load(f)
-with open(fn_embedding_words_dict, 'rb') as f:
-    embedding_word_dict = pickle.load(f)
 
-embedding_matrix = np.load(model_fp + 'embedding.npy')
-tc.id2word = dict((id, word) for word, id in words_dict.items())
 
 def transform_data(data):
     if cfg.do_preprocess:
@@ -59,21 +57,34 @@ def transform_data(data):
 
 
 train_data = pd.read_csv(TRAIN_DATA_FN)
-X = transform_data(train_data)
-Y = train_data[LIST_CLASSES].values
-if LEVEL == 'char':
-    preprocessor = Preprocessor(min_count_chars=20)
-    sentences_train = train_data["comment_text"].fillna("_NAN_").values
-    # sentences_train = [preprocessor.lower(text) for text in sentences_train]
-    preprocessor.create_char_vocabulary(sentences_train)
-    X = preprocessor.char2seq(sentences_train, maxlen=1000)
 
+if cfg.level == 'word':
+    with open(fn_words_dict, 'rb') as f:
+        words_dict = pickle.load(f)
+    with open(fn_embedding_words_dict, 'rb') as f:
+        embedding_word_dict = pickle.load(f)
+
+    embedding_matrix = np.load(model_fp + 'embedding.npy')
+    tc.id2word = dict((id, word) for word, id in words_dict.items())
+    X = transform_data(train_data)
+
+if cfg.level == 'char':
+    if cfg.do_preprocess:
+        train_data = preprocess(train_data)
+    sentences_train = train_data["comment_text"].fillna("_NAN_").values
+
+    sentences_train = [tc.preprocessor.lower(text) for text in sentences_train]
+    tc.preprocessor.min_count_chars = 10
+    tc.preprocessor.create_char_vocabulary(sentences_train)
+    X = tc.preprocessor.char2seq(sentences_train, maxlen=cfg.max_seq_len)
+    embedding_matrix = np.zeros((tc.preprocessor.char_vocab_size, tc.cfg.char_embedding_size))
+Y = train_data[LIST_CLASSES].values
 
 def predict(epoch, X):
     tf.reset_default_graph()
     num_batches = len(X) // cfg.bsize + 1
     bsize_last_batch = len(X) % (cfg.bsize * (num_batches - 1))
-    sess = tf.InteractiveSession(config=tf.ConfigProto(device_count={'GPU': 0}))
+    sess = tf.InteractiveSession(config=CFG_GPU)
 
     # load meta graph and restore weights
     saver = tf.train.import_meta_graph(logs + epoch + '.ckpt.meta')
@@ -135,10 +146,7 @@ for epoch in epochs:
 l2_data = pd.DataFrame(columns=LIST_LOGITS+LIST_CLASSES)
 l2_data[LIST_LOGITS] = pd.DataFrame(res_X)
 l2_data[LIST_CLASSES] = pd.DataFrame(res_Y)
-l2_data.to_csv(model_fp + 'l2_train_data.csv')
-
-
-
+l2_data.to_csv(model_fp + fn_out)
 
 
 

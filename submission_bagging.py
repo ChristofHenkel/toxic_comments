@@ -3,30 +3,34 @@ import os
 from scipy.interpolate import interp1d
 import numpy as np
 from utilities import corr_matrix
+from global_variables import LIST_CLASSES, TEST_FILENAME
 
-list_classes = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
-
-fp = 'submissions/ensembles/one/'
+fp = 'models/ENSAMBLES/e0/'
+add_comments = True
 input_fp = fp + 'input/'
-new_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
-csv_files = os.listdir(input_fp)
+if add_comments:
+    new_submission = pd.read_csv(TEST_FILENAME)
+else:
+    new_submission = pd.read_csv("assets/raw_data/sample_submission.csv")
+#csv_files = os.listdir(input_fp)
 
-csv_files = ['models/CNN/inception2_slim/test_data_folded.csv',
-             'models/NBSVM/slim/nbsvm_submission.csv',
-             'models/RNN/pavel_attention_slim2/test_data_folded.csv',
-             'models/RNN/pavel_all_outs_slim/test_data_folded.csv']
+#csv_files = ['models/CNN/inception2_slim/test_data_folded.csv',
+#             'models/NBSVM/slim/nbsvm_submission.csv',
+#             'models/RNN/pavel_attention_slim2/test_data_folded.csv',
+#             'models/RNN/pavel_all_outs_slim/test_data_folded.csv']
 
+csv_files = ['models/PUBLIC/' + fn for fn in os.listdir('models/PUBLIC/') if fn.endswith('.csv')]
 
 test_predicts_list = []
 for csv_file in csv_files:
     orig_submission = pd.read_csv(csv_file)
-    predictions = orig_submission[list_classes]
+    predictions = orig_submission[LIST_CLASSES]
     test_predicts_list.append(predictions)
 
 corr_matrix([p.values for p in test_predicts_list])
 
 def bag_by_average(test_predicts_list):
-    bagged_predicts = np.ones(test_predicts_list[0].shape)
+    bagged_predicts = np.zeros(test_predicts_list[0].shape)
     for predict in test_predicts_list:
         bagged_predicts += predict
 
@@ -60,13 +64,25 @@ def bag_by_rank_mean(test_predicts_list):
 
 
 submission = new_submission.copy()
-submission[list_classes] = bag_by_average(test_predicts_list)
-submission.to_csv("bag_by_mean.csv", index=False)
+if add_comments:
+    res = bag_by_average(test_predicts_list)
+    for i,label in enumerate(LIST_CLASSES):
+
+        submission[label] = res[:,i]
+else:
+    submission[LIST_CLASSES] = bag_by_average(test_predicts_list)
+submission.to_csv(fp + "bag_by_mean.csv", index=False)
 
 submission = new_submission.copy()
-submission[list_classes] = bag_by_rank_mean(test_predicts_list)
+if add_comments:
+    res = bag_by_average(test_predicts_list)
+    for i,label in enumerate(LIST_CLASSES):
+
+        submission[label] = res[:,i]
+else:
+    submission[LIST_CLASSES] = bag_by_rank_mean(test_predicts_list)
 submission.to_csv(fp + "bag_by_rank_mean.csv", index=False)
 
 submission = new_submission.copy()
-submission[list_classes] = bag_by_geomean(test_predicts_list)
+submission[LIST_CLASSES] = bag_by_geomean(test_predicts_list)
 submission.to_csv(fp + "bag_by_geomean.csv", index=False)

@@ -14,20 +14,20 @@ from preprocess_utils import Preprocessor
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.multiclass import OneVsRestClassifier
 import num2words
-from global_variables import TEST_FILENAME
+from global_variables import TEST_FILENAME, TRAIN_FILENAME, SAMPLE_SUBMISSION_FILENAME
 
 tokenizer = TweetTokenizer()
 
 PREPROCESS = True
 FN_OUT_TRAIN = 'models/NBSVM/slim/nbsvm_prediction_train.csv'
 FN_OUT_TEST = 'models/NBSVM/slim/nbsvm_prediction_test.csv'
-MODE = 'test'
+MODE = 'valid'
 COMMENT = 'comment_text'
 
-train = pd.read_csv('assets/raw_data/bagging_train.csv')
+train = pd.read_csv(TRAIN_FILENAME)
 #test = pd.read_csv('assets/raw_data/bagging_valid.csv')
 test = pd.read_csv(TEST_FILENAME)
-subm = pd.read_csv('assets/raw_data/sample_submission.csv')
+subm = pd.read_csv(SAMPLE_SUBMISSION_FILENAME)
 
 label_cols = ['toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
 list_logits = ['logits_' + c for c in label_cols]
@@ -46,7 +46,7 @@ def preprocess(data):
     data[COMMENT] = data[COMMENT].map(lambda x: p.lower(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_breaks(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.expand_contractions(x))
-    data[COMMENT] = data[COMMENT].map(lambda x: p.rm_ip(x))
+    data[COMMENT] = data[COMMENT].map(lambda x: p.replace_ip(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_links_text(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.replace_numbers(x))
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_bigrams(x))
