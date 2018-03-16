@@ -716,16 +716,25 @@ def preprocess(data, add_polarity = False, glove = False):
 
     print('preprocessing')
     p = Preprocessor()
+    print('lowercase')
     data[COMMENT] = data[COMMENT].map(lambda x: p.lower(x))
+    print('removing breaks')
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_breaks(x))
     if glove:
         data[COMMENT] = data[COMMENT].map(lambda x: p.glove_preprocess(x))
+    print('expanding contractions')
     data[COMMENT] = data[COMMENT].map(lambda x: p.expand_contractions(x))
+    print('replacing smileys')
     data[COMMENT] = data[COMMENT].map(lambda x: p.replace_smileys(x))
+    print('replacing ip')
     data[COMMENT] = data[COMMENT].map(lambda x: p.replace_ip(x))
+    print('removing links')
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_links_text(x))
+    print('replacing numbers')
     data[COMMENT] = data[COMMENT].map(lambda x: p.replace_numbers(x))
+    print('removing bigrams')
     data[COMMENT] = data[COMMENT].map(lambda x: p.rm_bigrams(x))
+    print('isolating punct')
     data[COMMENT] = data[COMMENT].map(lambda x: p.isolate_punc(x))
 
     if add_polarity:
