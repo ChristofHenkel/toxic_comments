@@ -224,7 +224,8 @@ model = build_model(rnn_units = 64, lr = 1e-3)
 model.summary()
 
 print("model fitting - Hierachical LSTM")
-fold_count = 10
+#fold_count = 10
+fold_count = 1
 fold_size = len(X) // 10
 for fold_id in range(0, fold_count):
     fold_start = fold_size * fold_id
