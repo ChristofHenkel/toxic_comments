@@ -8,6 +8,7 @@ from utilities import get_oov_vector
 import nltk
 from nltk.tokenize import TweetTokenizer
 from gensim.models import KeyedVectors, FastText
+from keras.preprocessing.text
 import tqdm
 import os
 import time
@@ -96,7 +97,7 @@ class ToxicComments:
         for sentence in tqdm.tqdm(sentences,mininterval=5):
             if hasattr(sentence, "decode"):
                 sentence = sentence.decode("utf-8")
-            sentence = self.preprocessor.expand_contractions(sentence)
+            #sentence = self.preprocessor.expand_contractions(sentence)
             if mode == 'nltk':
                 tokens = nltk.tokenize.word_tokenize(sentence)
             elif mode == 'twitter':
